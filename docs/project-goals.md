@@ -6,72 +6,106 @@ non-goal, or acceptance criterion changes — not for progress tracking.
 
 ## Outcome
 
-A buyer at a professional kitchen talks to a mobile app to order stock from Valio Aimo. The app
-listens, understands the request through an LLM that runs **behind our backend**, talks back,
-asks follow-up questions, and — once the buyer agrees to an order — offers an AR preview of how
-much physical space the delivery will take in their real storage room before the order is placed.
+A customer's own purchasing agent — for example a hotel chain's AI agent — connects to Valio Aimo
+through an **MCP server** and, guided by a **Valio Aimo skill**, finds products, gets prices and
+availability in structured form, and places an order within the authority its human owners gave
+it, or sends the order to a human for approval.
+
+This is not a chatbot or a replacement for the webshop UI. It is the interface and operating model
+that makes a food-service wholesaler safely and openly readable by any autonomous agent, built on
+open standards rather than one platform's black box.
 
 ## Product goals
 
-### Mobile app (buyer)
+### Agent interface (MCP server)
 
 | # | Goal |
 |---|------|
-| M1 | The buyer orders stock by speaking to the app (push-to-talk). |
-| M2 | The app turns speech into text and replies with synthesized speech, plus an on-screen transcript. |
-| M3 | Every LLM call goes through our backend; the device holds no LLM or Valio Aimo credentials. |
-| M4 | The conversation is interactive: the app asks clarifying questions, proposes options (price, availability, delivery date, substitutes) and asks for confirmation. The exact dialogue flow is defined by a diagram the product owner will supply — see [Conversation flow](#conversation-flow). |
-| M5 | After the buyer agrees to an order, the app offers an optional AR view through the phone camera that places the ordered volume (cases / pallets at true scale) in the real warehouse or cold room. |
+| A1 | Expose Valio Aimo to external agents as an MCP server with typed tools: product search, price and availability quote, order placement, and order status. |
+| A2 | Return structured, self-describing data: product id, name, sales unit and what it contains (for example 10 L per case), price, availability and earliest date, delivery reliability, CO₂ estimate, allergens and labels. |
+| A3 | Make the inquiry-to-order step explicit: the agent quotes a short list, then places an order at the quoted fixed price; changed prices or availability are refused, never silently applied. |
+| A4 | Authenticate each agent and tie it to a customer, so every action is attributable. |
+| A5 | Keep the same operations available over the existing REST API, so the interface is not tied to MCP alone. |
+
+### Customer skill
+
+| # | Goal |
+|---|------|
+| S1 | Ship a skill the customer installs in their own agent that teaches the procedure: narrow the catalog first, quote only the short list, convert the buyer's amounts into sales units, rank options by price and availability, and explain escalations. |
+| S2 | The skill guides; it never enforces. Every rule that matters is enforced by the server. |
 
 ### Backend
 
 | # | Goal |
 |---|------|
-| B1 | Provide the API the mobile app needs: conversation turns, speech in/out, order drafts, order confirmation, AR geometry. |
-| B2 | Wrap the Valio Aimo challenge APIs (product data, price, availability, delivery reliability, carbon footprint) behind our own typed endpoints; never call price/availability for the whole catalog. |
-| B3 | Implement the challenge **Core** (see `project.md`): product/price/availability lookup, inquiry → fixed-price order, and permission & human-approval rules (spend threshold, substitutions outside stated preferences). |
-| B4 | Keep a human-readable audit trail of what the agent did and why for every order. |
+| B1 | Wrap the Valio Aimo challenge APIs (product data, price, availability, delivery reliability, carbon footprint); never call price or availability for the whole catalog. |
+| B2 | Enforce permission and human-approval rules server-side: an order above the spend threshold, or with a line that breaks the buyer's stated requirements, becomes *pending approval* instead of being placed. |
+| B3 | Let a human approve or reject a pending order, and let the agent see the outcome. |
+| B4 | Keep a human-readable audit trail for every order: which agent, the request, options considered, the choice, the reason, and every status change. |
 
 ## Challenge alignment
 
 | Challenge requirement (`project.md`) | Covered by |
 |---|---|
-| Product, price & availability lookup | B2, M4 |
-| Inquiry → order at fixed price | B3, M4 |
-| Permission & human-approval management | B3 (the buyer's spoken "yes" is the human approval inside their authority; above-threshold orders escalate) |
-| Optional: delivery reliability & sustainability | B2 (data already provided) |
-| Optional: substitution handling | M4, B3 |
+| Product, price & availability lookup | A1, A2, B1 |
+| Inquiry → order at fixed price | A3 |
+| Permission & human-approval management | B2, B3, A4 |
+| Optional: delivery reliability & sustainability | A2 |
+| Optional: substitution and exception handling | S1, B2 (substitutes outside stated requirements escalate) |
 | Optional: traceability / explainability | B4 |
+
+## Decisions
+
+- **Spend threshold:** one configured amount (default 500 EUR excl. VAT), applied to each order on
+  its own. Splitting a purchase into smaller orders avoids escalation; accepted for the demo.
+- **Approval access:** the approve and reject endpoints are unauthenticated for the demo.
+- **Interaction model:** the customer brings the agent. Our in-house LLM agent, voice and AR work
+  is not part of the product (the mobile frontend has been removed).
 
 ## Non-goals
 
-- Building the B2B marketplace itself, or a multi-supplier catalog.
+- A chat, voice or mobile UI for buyers, or any replacement for the webshop.
+- Building the customer's agent itself; we provide the interface and the skill it uses.
+- Building the B2B marketplace, or a multi-supplier catalog.
 - Price negotiation or quotes — prices are fixed per the brief.
 - Real payments, invoicing, or real order submission to Valio Aimo production systems.
-- Full warehouse modelling or room scanning beyond placing a scaled volume in the camera view.
-- Multi-language voice beyond what the chosen STT/TTS provider offers out of the box.
 
 ## Acceptance criteria (demo-level)
 
-1. Saying *"I need 1,000 litres of lactose-free milk by Monday"* yields a spoken answer with at
-   least one concrete product, price, and availability for the requested date.
-2. The app asks at least one clarifying or confirming question before any order is created.
-3. An order above the configured spend threshold is not placed autonomously; it is marked
-   *pending approval* and the app says so.
-4. After the buyer agrees, the app offers AR; accepting shows a true-scale volume in the camera
-   view derived from product dimensions and ordered quantity.
-5. No secret (LLM key, Valio Aimo API key) is present in the mobile bundle or in git.
-6. Every confirmed or escalated order has an audit entry listing the request, options considered,
-   the choice, and the reason.
+1. An MCP-capable agent with the skill installed, given *"I need 1,000 litres of lactose-free
+   milk by Monday. Find an option that meets our requirements based on price and availability."*,
+   returns at least one concrete product with price, availability for the requested date, and
+   the quantity converted into sales units.
+2. An order within the agent's authority is placed without human involvement.
+3. An order above the spend threshold is not placed autonomously; it is marked *pending
+   approval*, the agent reports why, and a human approval or rejection is reflected in the
+   order status the agent reads back.
+4. The server refuses actions outside the rules even when the agent tries them, for example
+   placing at a stale price.
+5. No secret (LLM key, Valio Aimo API key, agent credential) is present in git; the agent holds
+   only its own credential, never Valio Aimo's upstream key.
+6. Every placed or escalated order has an audit entry listing the agent, the request, the
+   options considered, the choice, and the reason.
 
-## Conversation flow
+## Interaction flow
 
-Pending — the product owner will provide a diagram. Until then the working assumption is:
+`agent receives request → search catalog → quote short list → choose option → place order →
+placed | pending approval → (human approves or rejects) → agent reads status and audit`
 
-`listen → understand intent → look up products → propose options → clarify / confirm → (approval check) → offer AR → place or escalate order → read back summary`
+The product owner may still provide a flow diagram that refines these steps.
 
 ## Data on hand
 
 - `apps/api/data/` — challenge OpenAPI spec, product catalog (~17.5k items; ~82% carry
   case dimensions in `synkkaData.unitConversions[]`), delivery reliability, carbon footprint.
 - Upstream auth: `X-API-Key` header.
+
+## Open questions
+
+1. Should spending authority be defined per customer or per agent (a "mandate" holding the spend
+   limit, required labels, banned allergens and substitution policy), instead of one global
+   threshold?
+2. Should quotes be signed and carry an expiry so an agent can verify price and availability
+   claims without a manual check (the brief's "trust protocol")?
+3. Which agent host do we demo with, and does it connect to a hosted URL or a local server?
+4. Do the voice, conversation and AR endpoints still in `apps/api` stay or go?

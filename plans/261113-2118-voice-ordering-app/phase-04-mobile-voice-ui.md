@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: Mobile voice UI
-status: todo
+status: removed
 depends_on: [3]
 ---
 

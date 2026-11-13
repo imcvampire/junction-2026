@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: AR space preview
-status: todo
+status: done
 depends_on: [2, 4]
 ---
 

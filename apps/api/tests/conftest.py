@@ -1,0 +1,159 @@
+import json
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from api.agent.loop import ChatEvent
+from api.catalog.index import Catalog, load_catalog
+from api.config import Settings
+from api.main import create_app
+
+FIXTURE_DATA = Path(__file__).parent / "fixtures" / "data"
+DELIVERY = datetime.now(ZoneInfo("Europe/Helsinki")).date() + timedelta(days=3)
+
+
+@dataclass
+class FakeValio:
+    """Stand-in for the Valio Aimo price/availability API, driven by mutable tables."""
+
+    prices: dict[str, float] = field(
+        default_factory=lambda: {"462775": 2.57, "462921": 10.97, "464119": 15.4, "464073": 1.89, "460025": 3.2}
+    )
+    stock: dict[str, float] = field(default_factory=dict[str, float])
+    terminal: set[str] = field(default_factory=set[str])
+    status: int = 200
+    calls: list[tuple[str, list[str]]] = field(default_factory=list[tuple[str, list[str]]])
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if self.status != 200:
+            return httpx.Response(self.status, json={"detail": "nope"})
+        if request.headers.get("X-API-Key") != "test-key":
+            return httpx.Response(401, json={"detail": "bad key"})
+        body = json.loads(request.content)
+        codes: list[str] = body["products"]
+        self.calls.append((request.url.path, codes))
+        if request.url.path == "/api/price":
+            return httpx.Response(200, json=self._price(codes))
+        if request.url.path == "/api/availability":
+            return httpx.Response(200, json=self._availability(codes, body["requestedDate"]))
+        return httpx.Response(404)
+
+    def _price(self, codes: list[str]) -> dict[str, Any]:
+        products: list[dict[str, Any]] = []
+        for c in codes:
+            p = self.prices.get(c)
+            money = (
+                {"value": p, "valueWithTax": round(p * 1.135, 2), "validFrom": "x", "validTo": "y", "currency": "EUR"}
+                if p is not None
+                else None
+            )
+            products.append(
+                {
+                    "productId": c,
+                    "quantity": 1.0,
+                    "catalogPrice": money,
+                    "comparisonPrice": money,
+                    "comparisonUnit": "L",
+                    "netPriceFound": False,
+                    "error": p is None,
+                }
+            )
+        return {"customerId": "x", "currency": "EUR", "pricingDate": "2026-11-16", "products": products}
+
+    def _availability(self, codes: list[str], requested: str) -> dict[str, Any]:
+        products: list[dict[str, Any]] = []
+        for c in codes:
+            amount = 999999.0 if c in self.terminal else self.stock.get(c, 5000.0)
+            lines = (
+                [{"salesBlock": False, "availableAmount": amount, "availableDate": requested, "salesUnit": "ST"}]
+                if c in self.prices
+                else []
+            )
+            products.append({"productId": c, "salesBlock": False, "closingTime": None, "scheduleLines": lines})
+        return {"timeNow": "now", "requestedDate": requested, "products": products}
+
+
+class ScriptedChatModel:
+    """Replays scripted LLM rounds so tests exercise our loop, tools and state — not the model."""
+
+    def __init__(self, rounds: list[list[ChatEvent]] | None = None) -> None:
+        self.rounds: list[list[ChatEvent]] = list(rounds or [])
+        self.seen: list[list[dict[str, Any]]] = []
+        self.offered_tools: list[bool] = []
+        self.error: Exception | None = None
+        self.error_after_rounds: Exception | None = None
+
+    async def stream(
+        self, messages: list[dict[str, Any]], tool_schemas: list[dict[str, Any]] | None
+    ) -> AsyncIterator[ChatEvent]:
+        self.seen.append(json.loads(json.dumps(messages)))
+        self.offered_tools.append(tool_schemas is not None)
+        if self.error:
+            raise self.error
+        if not self.rounds:
+            if self.error_after_rounds:
+                raise self.error_after_rounds
+            raise AssertionError("scripted model ran out of rounds")
+        for ev in self.rounds.pop(0):
+            yield ev
+
+
+@pytest.fixture(scope="session")
+def catalog() -> Catalog:
+    return load_catalog(FIXTURE_DATA)
+
+
+@pytest.fixture
+def fake_valio() -> FakeValio:
+    return FakeValio()
+
+
+@pytest.fixture
+def chat() -> ScriptedChatModel:
+    return ScriptedChatModel()
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    return Settings(
+        data_dir=FIXTURE_DATA,
+        db_path=tmp_path / "test.sqlite3",
+        valio_base_url="http://valio.test",
+        valio_api_key=SecretStr("test-key"),
+        approval_spend_threshold_eur=500.0,
+        quote_cache_ttl_s=300.0,
+        voice_base_url=None,
+    )
+
+
+@pytest.fixture
+def client(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio, chat: ScriptedChatModel
+) -> Iterator[TestClient]:
+    app = create_app(
+        settings, catalog=catalog, valio_transport=httpx.MockTransport(fake_valio.handler), chat_model=chat
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
+    events: list[tuple[str, dict[str, Any]]] = []
+    for block in body.strip().split("\n\n"):
+        name, data = "", ""
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                name = line[7:]
+            elif line.startswith("data: "):
+                data = line[6:]
+        if name:
+            events.append((name, json.loads(data)))
+    return events

@@ -66,6 +66,6 @@ Rules for using the data:
 
 ## Commands
 
-Tasks are defined in `mise.toml`: `mise run install`, `mise run dev` (API on port 8000, web on
-port 5173), `mise run check` (lint, typecheck and test), and `mise run fmt`. For focused API tests,
+Tasks are defined in `mise.toml`: `mise run install`, `mise run dev` (API on port
+8000), `mise run check` (lint, typecheck and test), and `mise run fmt`. For focused API tests,
 run `uv run pytest tests/test_<area>.py` inside `apps/api`.

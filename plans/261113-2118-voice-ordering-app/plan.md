@@ -1,6 +1,6 @@
 ---
 title: Voice ordering mobile app with AR space preview
-status: draft
+status: in-progress
 created: 2026-11-13
 mode: auto (standard)
 goals: docs/project-goals.md
@@ -55,11 +55,11 @@ flowchart LR
 
 | # | Phase | Depends on | Status |
 |---|---|---|---|
-| 1 | [Backend foundation: upstream client + catalog](phase-01-backend-foundation.md) | — | todo |
-| 2 | [Orders, approval policy, audit trail](phase-02-orders-approval-audit.md) | 1 | todo |
-| 3 | [Conversational agent + voice endpoints](phase-03-agent-and-voice.md) | 1, 2 | todo |
-| 4 | [Mobile voice UI](phase-04-mobile-voice-ui.md) | 3 | todo |
-| 5 | [AR space preview](phase-05-ar-space-preview.md) | 2, 4 | todo |
+| 1 | [Backend foundation: upstream client + catalog](phase-01-backend-foundation.md) | — | done |
+| 2 | [Orders, approval policy, audit trail](phase-02-orders-approval-audit.md) | 1 | done |
+| 3 | [Conversational agent + voice endpoints](phase-03-agent-and-voice.md) | 1, 2 | done |
+| 4 | [Mobile voice UI](phase-04-mobile-voice-ui.md) | 3 | removed (frontend dropped) |
+| 5 | [AR space preview](phase-05-ar-space-preview.md) | 2, 4 | backend done; frontend removed |
 
 Phases 1 → 2 → 3 are serial (shared `apps/api` modules). Phase 4 can start against a stubbed
 `/api/conversations` contract once Phase 3's schema is fixed. Phase 5's BE part (glTF endpoint)
@@ -80,10 +80,12 @@ can run in parallel with Phase 4.
 | LLM proposes an order outside policy | Policy enforced in BE tool, never in the prompt alone. |
 | Conversation diagram arrives late | Agent flow is a state field + prompt section; swap without touching tools or UI contract. |
 
+## Direction change (2026-11-13)
+
+The brief targets external purchasing agents, not a buyer chatbot, so `apps/web` (voice PWA and AR view) was removed. The backend core (catalog, fixed-price orders, approval policy, audit) carries forward into an MCP + REST interface for customers' agents; the voice, conversation and AR endpoints remain in `apps/api` but have no client.
+
 ## Unresolved questions
 
-1. The conversation-flow diagram (pending from the product owner) may add states that change the `/api/conversations` response schema.
-2. Is a PWA acceptable as "the mobile app", or must it be a store-installable native app?
-3. Which STT/TTS provider will we use? (LLM is settled: Verda / `kimi-k3-1-pro`; base URL still needed.)
-4. Spend threshold value and who the escalation approver is in the demo.
-5. Upstream base URL — not present in `openapi.json` `servers`.
+1. The conversation-flow diagram (pending from the product owner) may add states that change the `/api/conversations` response schema. `flow_state` is a `Literal` in `api/agent/state.py`; new states need a prompt line and the tool effect that enters them.
+
+Resolved: LLM is Verda `https://inference.verda.com` with `kimi-k3-1-pro`; streaming tool calls verified live and the reference milk request ran end to end (search, quote, draft, agree, AR offer, escalation). Voice uses on-device Web Speech for now. Approve/reject stay unauthenticated for the demo and the spend threshold applies per order (both documented in `docs/backend-api.md`). Upstream base URL is `https://junction26.valioaimo.fi` (verified with `/api/ping`); spend threshold defaults to 500 EUR excl. VAT (`API_APPROVAL_SPEND_THRESHOLD_EUR`).

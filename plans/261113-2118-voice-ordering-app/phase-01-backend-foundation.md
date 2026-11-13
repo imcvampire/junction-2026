@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: Backend foundation — upstream client and catalog
-status: todo
+status: done
 depends_on: []
 ---
 
