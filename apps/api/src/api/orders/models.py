@@ -4,12 +4,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from api.agents.models import Role
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
 class OrderStatus(StrEnum):
+    # DRAFT and AGREED belong to the retired buyer flow; kept so older rows still load.
     DRAFT = "draft"
     AGREED = "agreed"
     PLACED = "placed"
@@ -19,33 +22,6 @@ class OrderStatus(StrEnum):
 
 
 Actor = Literal["agent", "buyer", "approver", "system"]
-
-
-class OrderLineRequest(BaseModel):
-    product_id: str = Field(min_length=1, max_length=32)
-    quantity: float = Field(gt=0, le=100_000, description="Quantity in the product's sales unit")
-    substitute_for: str | None = Field(
-        default=None, max_length=32, description="Product id the buyer originally asked for, if this is a substitute"
-    )
-
-
-class Candidate(BaseModel):
-    product_id: str = Field(max_length=32)
-    note: str = Field(default="", max_length=300)
-
-
-class DraftRequest(BaseModel):
-    delivery_date: date
-    lines: list[OrderLineRequest] = Field(min_length=1, max_length=50)
-    preferences: list[str] = Field(
-        default_factory=list[str],
-        max_length=20,
-        description="Buyer-stated requirements as catalog tags, e.g. LACTOSE_FREE, VEGAN, FREE_FROM:AM, brand:Valio",
-    )
-    request_text: str = Field(default="", max_length=2000)
-    candidates: list[Candidate] = Field(default_factory=list[Candidate], max_length=50)
-    reason: str = Field(default="", max_length=1000)
-    session_id: str | None = None
 
 
 class OrderLine(BaseModel):
@@ -60,11 +36,28 @@ class OrderLine(BaseModel):
     covers_request: bool
     substitute_for: str | None = None
     within_preferences: bool = True
+    missing_requirements: list[str] = Field(default_factory=list[str])
+
+
+class DecidedBy(BaseModel):
+    agent_id: str
+    name: str
+    role: Role
+
+
+class OrderDecision(BaseModel):
+    approved: bool
+    reason: str
+    at: datetime
+    decided_by: DecidedBy | None = Field(default=None, description="The admin key that decided; unset on older orders")
 
 
 class Order(BaseModel):
     id: str
-    session_id: str | None
+    session_id: str | None = None
+    agent_id: str | None = None
+    quote_id: str | None = None
+    client_reference: str | None = None
     status: OrderStatus
     customer: str
     delivery_date: date
@@ -76,8 +69,7 @@ class Order(BaseModel):
     created_at: datetime
     updated_at: datetime
     approval_reasons: list[str] = Field(default_factory=list[str])
-    created_turn: int | None = None
-    agreed_turn: int | None = None
+    decision: OrderDecision | None = None
 
 
 class AuditEntry(BaseModel):
@@ -86,8 +78,9 @@ class AuditEntry(BaseModel):
     actor: Actor
     action: str
     summary: str
+    agent_id: str | None = None
     details: dict[str, Any] = Field(default_factory=dict[str, Any])
 
 
 class Decision(BaseModel):
-    reason: str = Field(default="", max_length=1000)
+    reason: str = Field(min_length=1, max_length=1000, description="Why the order is approved or rejected")

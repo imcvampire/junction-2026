@@ -1,20 +1,22 @@
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from api.agent.loop import ChatEvent
+from api.agents.models import AgentPrincipal, Mandate, Role
 from api.catalog.index import Catalog, load_catalog
 from api.config import Settings
 from api.main import create_app
+from api.services import Services
 
 FIXTURE_DATA = Path(__file__).parent / "fixtures" / "data"
 DELIVERY = datetime.now(ZoneInfo("Europe/Helsinki")).date() + timedelta(days=3)
@@ -81,31 +83,6 @@ class FakeValio:
         return {"timeNow": "now", "requestedDate": requested, "products": products}
 
 
-class ScriptedChatModel:
-    """Replays scripted LLM rounds so tests exercise our loop, tools and state — not the model."""
-
-    def __init__(self, rounds: list[list[ChatEvent]] | None = None) -> None:
-        self.rounds: list[list[ChatEvent]] = list(rounds or [])
-        self.seen: list[list[dict[str, Any]]] = []
-        self.offered_tools: list[bool] = []
-        self.error: Exception | None = None
-        self.error_after_rounds: Exception | None = None
-
-    async def stream(
-        self, messages: list[dict[str, Any]], tool_schemas: list[dict[str, Any]] | None
-    ) -> AsyncIterator[ChatEvent]:
-        self.seen.append(json.loads(json.dumps(messages)))
-        self.offered_tools.append(tool_schemas is not None)
-        if self.error:
-            raise self.error
-        if not self.rounds:
-            if self.error_after_rounds:
-                raise self.error_after_rounds
-            raise AssertionError("scripted model ran out of rounds")
-        for ev in self.rounds.pop(0):
-            yield ev
-
-
 @pytest.fixture(scope="session")
 def catalog() -> Catalog:
     return load_catalog(FIXTURE_DATA)
@@ -117,11 +94,6 @@ def fake_valio() -> FakeValio:
 
 
 @pytest.fixture
-def chat() -> ScriptedChatModel:
-    return ScriptedChatModel()
-
-
-@pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
         data_dir=FIXTURE_DATA,
@@ -130,30 +102,38 @@ def settings(tmp_path: Path) -> Settings:
         valio_api_key=SecretStr("test-key"),
         approval_spend_threshold_eur=500.0,
         quote_cache_ttl_s=300.0,
-        voice_base_url=None,
+        mcp_allowed_hosts=["testserver", "127.0.0.1:*"],
     )
 
 
 @pytest.fixture
-def client(
-    settings: Settings, catalog: Catalog, fake_valio: FakeValio, chat: ScriptedChatModel
-) -> Iterator[TestClient]:
-    app = create_app(
-        settings, catalog=catalog, valio_transport=httpx.MockTransport(fake_valio.handler), chat_model=chat
-    )
+def client(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> Iterator[TestClient]:
+    app = create_app(settings, catalog=catalog, valio_transport=httpx.MockTransport(fake_valio.handler))
     with TestClient(app) as c:
         yield c
 
 
-def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
-    events: list[tuple[str, dict[str, Any]]] = []
-    for block in body.strip().split("\n\n"):
-        name, data = "", ""
-        for line in block.splitlines():
-            if line.startswith("event: "):
-                name = line[7:]
-            elif line.startswith("data: "):
-                data = line[6:]
-        if name:
-            events.append((name, json.loads(data)))
-    return events
+def services_of(client: TestClient) -> Services:
+    return cast(Services, cast(FastAPI, client.app).state.services)
+
+
+AgentFactory = Callable[..., tuple[AgentPrincipal, str]]
+
+
+@pytest.fixture
+def make_agent(client: TestClient) -> AgentFactory:
+    def make(
+        name: str = "hotel-agent", customer: str = "hotel-1", role: Role = "member", **mandate: Any
+    ) -> tuple[AgentPrincipal, str]:
+        return services_of(client).agents.create(name, customer, Mandate(**mandate), role)
+
+    return make
+
+
+@pytest.fixture
+def agent_key(make_agent: AgentFactory) -> str:
+    return make_agent()[1]
+
+
+def bearer(key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {key}"}

@@ -1,6 +1,7 @@
 ---
 title: Voice ordering mobile app with AR space preview
-status: in-progress
+status: superseded
+superseded_by: plans/261113-2227-mcp-agent-interface
 created: 2026-11-13
 mode: auto (standard)
 goals: docs/project-goals.md

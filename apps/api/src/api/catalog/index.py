@@ -241,7 +241,7 @@ def project_product(raw: dict[str, Any], reliability: dict[str, float], carbon: 
     per_sales: float | None = 1.0 if raw["salesUnit"] == raw["baseUnit"] else units.get(raw["salesUnit"])
     base_content = _base_content(raw, convs.get("BASE_UNIT_OR_EACH"), name_en)
     content = None
-    if base_content and per_sales:
+    if base_content and base_content.amount > 0 and per_sales:
         content = Content(round(base_content.amount * per_sales, 4), base_content.unit)
 
     allergens = frozenset(_classification_ids(sd, "allergen", "CONTAINS"))

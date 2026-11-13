@@ -144,14 +144,12 @@ class ValioClient:
         http: httpx.AsyncClient | None,
         *,
         api_key: str | None,
-        customer: str,
         cache_ttl_s: float,
     ) -> None:
         self._http = http
         self._api_key = api_key
-        self._customer = customer
         self._ttl = cache_ttl_s
-        self._cache: dict[tuple[str, date], tuple[float, ProductQuote]] = {}
+        self._cache: dict[tuple[str, str, date], tuple[float, ProductQuote]] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -162,10 +160,10 @@ class ValioClient:
         await self._request("GET", "/api/ping")
         return True
 
-    async def quote(self, codes: list[str], requested: date) -> dict[str, ProductQuote]:
+    async def quote(self, codes: list[str], requested: date, *, customer: str) -> dict[str, ProductQuote]:
         """Price + availability for `codes`, served from a short TTL cache where possible.
 
-        Prices/availability are per (customer, product, date); the customer is fixed per client.
+        Prices and availability are customer-specific, so the cache is keyed per (customer, product, date).
         """
         unique = sorted(set(codes))
         if not unique:
@@ -177,14 +175,14 @@ class ValioClient:
         result: dict[str, ProductQuote] = {}
         async with self._lock:
             for code in unique:
-                hit = self._cache.get((code, requested))
+                hit = self._cache.get((customer, code, requested))
                 if hit and now - hit[0] < self._ttl:
                     result[code] = hit[1]
         missing = [c for c in unique if c not in result]
         if not missing:
             return result
 
-        body = {"customer": self._customer, "requestedDate": requested.isoformat(), "products": missing}
+        body = {"customer": customer, "requestedDate": requested.isoformat(), "products": missing}
         price_raw, avail_raw = await asyncio.gather(
             self._request("POST", "/api/price", json=body),
             self._request("POST", "/api/availability", json=body),
@@ -202,14 +200,14 @@ class ValioClient:
         async with self._lock:
             for code in missing:
                 q = merge_quote(code, requested, prices.currency, price_by_id.get(code), avail_by_id.get(code))
-                self._cache[(code, requested)] = (fetched_at, q)
+                self._cache[(customer, code, requested)] = (fetched_at, q)
                 result[code] = q
         log.info("valio_quote", extra={"requested": len(unique), "fetched": len(missing)})
         return result
 
-    def invalidate(self, codes: list[str], requested: date) -> None:
+    def invalidate(self, codes: list[str], requested: date, *, customer: str) -> None:
         for code in codes:
-            self._cache.pop((code, requested), None)
+            self._cache.pop((customer, code, requested), None)
 
     async def _request(self, method: str, path: str, json: dict[str, Any] | None = None) -> Any:
         if self._http is None or not self._api_key:

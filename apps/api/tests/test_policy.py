@@ -59,3 +59,12 @@ def test_reasons_are_human_readable() -> None:
     assert len(reasons) == 2
     assert "spend limit" in reasons[0]
     assert "LACTOSE_FREE" in reasons[1]
+
+
+def test_mandate_limit_overrides_global_and_is_named() -> None:
+    policy = ApprovalPolicy(500.0)
+    order = _order(300)
+
+    assert policy.evaluate(order) == []
+    reasons = policy.evaluate(order, policy.limit_for(200.0))
+    assert reasons == ["Total 300.00 EUR exceeds the 200.00 EUR spend limit (agent mandate)"]
