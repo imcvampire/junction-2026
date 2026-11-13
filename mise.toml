@@ -1,0 +1,76 @@
+[tools]
+node = "24"
+pnpm = "12"
+python = "3.13"
+uv = "0.12"
+
+[env]
+_.file = { path = ".env", redact = true }
+API_PORT = "8000"
+WEB_PORT = "5173"
+
+[tasks.install]
+description = "Install FE and BE dependencies"
+depends = ["install:*"]
+
+[tasks."install:web"]
+dir = "apps/web"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."install:api"]
+dir = "apps/api"
+run = "uv sync --locked"
+
+[tasks.dev]
+description = "Run FE and BE dev servers"
+depends = ["dev:*"]
+
+[tasks."dev:web"]
+dir = "apps/web"
+run = "pnpm dev"
+
+[tasks."dev:api"]
+dir = "apps/api"
+run = "uv run fastapi dev src/api/main.py --host 127.0.0.1 --port $API_PORT"
+
+[tasks.check]
+description = "Lint, typecheck and test everything"
+depends = ["lint", "typecheck", "test"]
+
+[tasks.lint]
+depends = ["lint:*"]
+
+[tasks."lint:web"]
+dir = "apps/web"
+run = "pnpm lint"
+
+[tasks."lint:api"]
+dir = "apps/api"
+run = ["uv run ruff check .", "uv run ruff format --check ."]
+
+[tasks.typecheck]
+depends = ["typecheck:*"]
+
+[tasks."typecheck:web"]
+dir = "apps/web"
+run = "pnpm typecheck"
+
+[tasks."typecheck:api"]
+dir = "apps/api"
+run = "uv run pyright"
+
+[tasks.test]
+depends = ["test:*"]
+
+[tasks."test:api"]
+dir = "apps/api"
+run = "uv run pytest"
+
+[tasks.fmt]
+description = "Auto-fix Python lint and formatting"
+dir = "apps/api"
+run = ["uv run ruff check --fix .", "uv run ruff format ."]
+
+[tasks.build]
+dir = "apps/web"
+run = "pnpm build"
