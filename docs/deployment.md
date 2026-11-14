@@ -26,8 +26,9 @@ adds that host to `API_MCP_ALLOWED_HOSTS`.
 
 | Setting | Value | Notes |
 |---|---|---|
-| Instance type | `CPU.4V.16G` | About €0.048 an hour (Verda API, 2026-11-14). It was only available in `FIN-01`. |
-| Image | `24.04.base` | Ubuntu 24.04 minimal. |
+| Location | `FIN-03` | |
+| Instance type | `CPU.4V.16G.CC` | About €0.049 an hour. 4 vCPU is Verda's smallest CPU type. On 2026-11-14, `CPU.4V.16G` had no capacity anywhere, and this was the only on-demand CPU type available. |
+| Image | `26.04.cuda13.2.cc` | Ubuntu 26.04. This is the only image the `.CC` type supports. Change it together with the type. |
 | OS volume | 50 GB NVMe | Deleted with the instance. |
 | SSH user | `root` | |
 
