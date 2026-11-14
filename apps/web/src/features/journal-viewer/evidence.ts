@@ -84,7 +84,7 @@ export function statusLabel(status: string) {
     no_order: "No Order Recorded",
     failed: "Purchase Failed",
     approval_unknown: "Approval Outcome Unknown",
-    approval_rejected: "Approval Rejected",
+    approval_rejected: "Purchase Rejected",
   }
   return labels[status] ?? "Not available"
 }
@@ -93,12 +93,17 @@ export function statusLabel(status: string) {
 export function orderDisplayStatus(order: Order) {
   if (order.decision?.decision === "approved") return "approved"
   if (order.decision?.decision === "rejected") return "approval_rejected"
-  if (order.status === "approved")
-    return "approval_unknown"
+  if (order.status === "approved") return "approval_unknown"
   return order.status
 }
 
 export function purchaseDisplayStatus(journal: ValioAimoJournal) {
+  if (
+    journal.orders.some(
+      (order) => orderDisplayStatus(order) === "pending_approval"
+    )
+  )
+    return "pending_approval"
   if (journal.orders.length === 1) return orderDisplayStatus(journal.orders[0])
   if (
     journal.outcome === "approved" &&

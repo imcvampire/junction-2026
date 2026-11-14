@@ -27,7 +27,11 @@ describe("purchase at a glance", () => {
     expect(fact("Expected delivery date")).toHaveTextContent("16 Nov 2026")
     expect(fact("Total cost excluding VAT")).toHaveTextContent("€1,540.00")
     expect(fact("Human approval needed")).toHaveTextContent("Yes")
-    expect(screen.getByText("Purchase Approved")).toHaveClass("status-success")
+    expect(
+      screen
+        .getAllByText("Purchase Approved")
+        .find((node) => node.classList.contains("status-success"))
+    ).toBeDefined()
     expect(
       screen.getByRole("heading", { name: "What happens next?" })
     ).toBeInTheDocument()

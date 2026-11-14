@@ -6,6 +6,8 @@ import {
   ShieldCheckIcon,
   TrendingDownIcon,
   ArrowRightIcon,
+  ClockIcon,
+  CircleXIcon,
   CalendarDaysIcon,
   CircleCheckIcon,
   CoinsIcon,
@@ -42,6 +44,7 @@ import { ErrorsList } from "./errors-list"
 import { OrdersList } from "./orders-list"
 import { QuestionsList } from "./questions-list"
 import { API_OPERATIONS } from "../journey"
+import { purchaseNextAction } from "../next-action"
 
 export function Panel({
   children,
@@ -152,25 +155,35 @@ export function CopyId({ value }: { value: string }) {
 }
 
 function NextAction({ journal }: { journal: ValioAimoJournal }) {
+  const action = purchaseNextAction(journal)
+  const Icon =
+    action.tone === "pending"
+      ? ClockIcon
+      : action.tone === "approved"
+        ? CircleCheckIcon
+        : action.tone === "rejected"
+          ? CircleXIcon
+          : ArrowRightIcon
   return (
-    <div className="rounded-xl border border-primary/20 bg-accent p-5 text-sm leading-relaxed">
-      <h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-primary">
-        <ArrowRightIcon className="size-5 shrink-0" aria-hidden />
+    <div
+      aria-label="Next purchasing action"
+      className={cn(
+        "rounded-xl border p-5 text-sm leading-relaxed",
+        action.tone === "pending"
+          ? "status-warning"
+          : action.tone === "approved"
+            ? "status-success"
+            : action.tone === "rejected"
+              ? "status-error"
+              : "border-primary/20 bg-accent text-primary"
+      )}
+    >
+      <h3 className="mb-2 flex items-center gap-2 text-base font-semibold">
+        <Icon className="size-5 shrink-0" aria-hidden />
         What happens next?
       </h3>
-      {journal.next_steps.length ? (
-        <ul className="mt-1 list-disc space-y-1 pl-5">
-          {journal.next_steps.map((s, i) => (
-            <li key={i}>{businessText(s, journal)}</li>
-          ))}
-        </ul>
-      ) : journal.orders.some((o) => o.status === "pending_approval") ? (
-        "The buyer still needs to approve or decline this purchase."
-      ) : journal.orders.some((o) => o.status === "rejected") ? (
-        "The purchase was rejected. No further action is recorded."
-      ) : (
-        "No further action is recorded. Confirmation from the wholesaler has not been verified."
-      )}
+      <p className="font-semibold">{action.title}</p>
+      <p className="mt-1">{action.message}</p>
     </div>
   )
 }

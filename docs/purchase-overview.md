@@ -88,6 +88,17 @@ Approval — Pending**, with an amber clock and no estimated completion time. An
 approval activity with no recorded outcome and no known pending state shows
 **Approval Decision Not Recorded — Pending / Outcome Unknown**, also without a
 decision timestamp. Actual interaction timestamps remain in the original record.
+While approval is pending, the customer journey hides purchase-update and record-
+completion steps and ends with **Awaiting Approval — Pending**. After a recorded
+decision, only updates supported by journal events and completion supported by
+`finished_at` appear. The summary's **What happens next?** uses the same display
+status, with amber for pending, green for approved, red for rejected and Heritage
+Blue for informational states. Pending amounts and EUR spending limits come from
+the record; an exceeded limit is stated only when those values are comparable.
+Generic `next_steps` text cannot override approval status. Buyer approval never
+establishes wholesaler confirmation; the current schema has no explicit supplier
+confirmation field, so the viewer keeps that confirmation unverified.
+
 Record completion uses `finished_at` and never resolves a pending order. A status
 of `approved` without a recorded approving decision is presented as **Approval
 Outcome Unknown**, rather than a green approved badge, throughout customer status

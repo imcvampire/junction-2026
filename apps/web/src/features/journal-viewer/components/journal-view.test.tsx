@@ -125,7 +125,10 @@ describe("customer purchase overview", () => {
     renderJournal(j)
     expect(screen.getByText("Change the order to 250 L")).toBeInTheDocument()
     expect(screen.getByText("How much milk do you need?")).toBeInTheDocument()
-    expect(screen.getByText("Contact the buyer")).toBeInTheDocument()
+    expect(screen.getByLabelText("Next purchasing action")).toHaveTextContent(
+      "The buyer has approved this purchase."
+    )
+    expect(screen.queryByText("Contact the buyer")).not.toBeInTheDocument()
     expect(
       screen.getByText("Risk acceptance is not explicitly recorded.")
     ).toBeInTheDocument()

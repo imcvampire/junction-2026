@@ -99,7 +99,7 @@ test("rejection preserves its actual decision time and completion does not resol
     purchasingJourney(outstanding).find(
       (s) => s.title === "Purchase Record Completed"
     )?.time
-  ).toMatchObject({ value: outstanding.finished_at, source: "recorded" })
+  ).toBeUndefined()
   expect(purchaseDisplayStatus(outstanding)).toBe("pending_approval")
 })
 
@@ -107,9 +107,9 @@ test("a recorded approval decision takes precedence over a stale order status", 
   const j = fixture()
   j.orders[0].status = "pending_approval"
   expect(purchaseDisplayStatus(j)).toBe("approved")
-  expect(
-    purchasingJourney(j).find((s) => s.type === "order")?.title
-  ).toBe("Purchase Recorded")
+  expect(purchasingJourney(j).find((s) => s.type === "order")?.title).toBe(
+    "Purchase Recorded"
+  )
 })
 
 test("does not claim task completion when finished_at is absent", () => {
@@ -149,7 +149,7 @@ test("main badge cannot imply approval without a recorded decision", () => {
   const j = fixture()
   j.orders[0].decision = null
   render(<PurchaseOutcome journal={j} />)
-  expect(screen.getByText("Approval Outcome Unknown")).toHaveClass(
+  expect(screen.getAllByText("Approval Outcome Unknown")[0]).toHaveClass(
     "status-warning"
   )
   expect(screen.queryByText("Purchase Approved")).not.toBeInTheDocument()

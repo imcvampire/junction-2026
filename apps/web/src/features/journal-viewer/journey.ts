@@ -441,7 +441,26 @@ export function purchasingJourney(journal: ValioAimoJournal): JourneyStep[] {
     })
   // Apply the same rule to derived steps (selection/completion) without changing source data.
   let previous: string | undefined
-  return steps.map((step) => {
+  const pending = purchaseDisplayStatus(journal) === "pending_approval"
+  const visible = pending
+    ? steps.filter(
+        (step) =>
+          step.type !== "report" &&
+          !(step.type === "approval" && step.time.source === "pending")
+      )
+    : steps
+  if (pending)
+    visible.push({
+      key: "awaiting-approval-final",
+      type: "approval",
+      title: "Awaiting Approval",
+      explanation:
+        "The buyer must approve or reject the order before the purchasing process can continue.",
+      status: "attention",
+      time: { source: "pending", note: "Pending" },
+      facts: [["Buyer decision", "Awaiting approval"]],
+    })
+  return visible.map((step) => {
     const unresolved =
       step.time.source === "pending" || step.time.source === "unknown"
     const time =
