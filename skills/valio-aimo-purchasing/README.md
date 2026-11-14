@@ -21,3 +21,12 @@ how to use the Valio Aimo MCP server. The server enforces every rule; the skill 
 - `SKILL.md`: the procedure and the error table.
 - `references/tags-and-units.md`: how to read tags, allergens, sales units and availability in results.
 - `references/worked-example.md`: the reference request from start to finish.
+- `references/journal.md`, `references/journal.schema.json`, `references/journal-example.json`: the
+  task journal, its JSON Schema and an example.
+
+## Journals
+
+When a task ends, the agent writes one JSON file to `valio-aimo-journal/YYYY-MM-DD-HHMM-<slug>.json`
+in the host's working directory: what was asked, searched and quoted, what the buyer chose, and the
+orders it left behind. Every journal validates against the shipped `journal.schema.json`, so a
+viewer can parse it without guessing. The server's audit trail stays the record of truth.

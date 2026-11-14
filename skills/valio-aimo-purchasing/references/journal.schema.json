@@ -1,0 +1,466 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://valio-aimo.example/schemas/valio-aimo-journal/1",
+  "title": "Valio Aimo purchasing journal",
+  "description": "The purchasing agent's own account of one task: what the buyer asked, what it searched and quoted, what the buyer chose, which orders exist and why. The server's audit trail stays the record of truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "journal_id",
+    "title",
+    "summary",
+    "kind",
+    "outcome",
+    "started_at",
+    "finished_at",
+    "agent",
+    "authority",
+    "request",
+    "searches",
+    "candidates",
+    "quotes",
+    "questions",
+    "decision",
+    "orders",
+    "errors",
+    "timeline",
+    "metrics",
+    "narrative",
+    "next_steps"
+  ],
+  "properties": {
+    "schema": {
+      "const": "valio-aimo-journal",
+      "description": "Marks the document as a Valio Aimo journal; a viewer rejects anything else."
+    },
+    "schema_version": {
+      "const": 1,
+      "description": "Document format version. Additive fields keep 1; renames or removals bump it."
+    },
+    "journal_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "A new UUID per journal."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "List-view headline, e.g. '1,000 L lactose-free milk for Mon 16 Nov'."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "One sentence stating the outcome."
+    },
+    "kind": {
+      "enum": ["purchase", "decision", "cancel", "replace", "inquiry"],
+      "description": "What the task was."
+    },
+    "outcome": {
+      "enum": ["placed", "pending_approval", "approved", "rejected", "cancelled", "no_order", "failed"],
+      "description": "The final state the task left behind; matches order statuses where they overlap."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the task started, ISO 8601 with offset."
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the task ended, ISO 8601 with offset."
+    },
+    "agent": {
+      "type": "object",
+      "required": ["agent_id", "customer"],
+      "description": "Who acted, from whoami.",
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/id", "description": "whoami agent_id." },
+        "customer": { "$ref": "#/$defs/id", "description": "whoami customer." },
+        "host": { "type": ["string", "null"], "description": "The agent host, e.g. 'Claude Code', when known." },
+        "model": { "type": ["string", "null"], "description": "The model, when the host exposes it." }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["spend_limit_eur", "required_tags", "banned_allergens"],
+      "description": "The agent's mandate, from whoami.",
+      "properties": {
+        "spend_limit_eur": {
+          "type": ["number", "null"],
+          "description": "Per-order total (excl. VAT) above which a human must approve."
+        },
+        "required_tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tags every order line must meet."
+        },
+        "banned_allergens": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "GS1 allergen codes no line may contain."
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["text", "requirements"],
+      "description": "The buyer's words verbatim and how the agent read them.",
+      "properties": {
+        "text": { "type": "string", "description": "The buyer's request, verbatim." },
+        "delivery_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "The resolved delivery date."
+        },
+        "amount": {
+          "type": ["object", "null"],
+          "required": ["value", "unit"],
+          "description": "The amount in the buyer's unit, e.g. 1000 L.",
+          "properties": {
+            "value": { "type": "number", "description": "Amount value." },
+            "unit": { "type": "string", "description": "Buyer unit: L, dl, cl, ml, kg or g." }
+          }
+        },
+        "quantity": {
+          "type": ["number", "null"],
+          "description": "Quantity in sales units, when the buyer spoke in packs."
+        },
+        "requirements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Requirement tags derived from the request, e.g. LACTOSE_FREE."
+        },
+        "purpose": {
+          "type": ["string", "null"],
+          "description": "What the product is for, e.g. 'coffee'."
+        }
+      }
+    },
+    "searches": {
+      "type": "array",
+      "description": "One entry per search_products call.",
+      "items": {
+        "type": "object",
+        "required": ["query", "required_tags", "exclude_allergens", "result_count"],
+        "properties": {
+          "query": { "type": "string", "description": "The search query." },
+          "required_tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "required_tags passed."
+          },
+          "exclude_allergens": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "exclude_allergens passed."
+          },
+          "result_count": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "The result's count."
+          }
+        }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Products considered before quoting, and why each was kept or dropped.",
+      "items": {
+        "type": "object",
+        "required": ["product_id", "name", "source", "kept"],
+        "properties": {
+          "product_id": { "$ref": "#/$defs/id", "description": "Catalog product id." },
+          "name": { "type": "string", "description": "Product name from the search result." },
+          "source": {
+            "enum": ["search", "substitute", "buyer"],
+            "description": "Where the candidate came from."
+          },
+          "kept": { "type": "boolean", "description": "Whether it went on to the quote." },
+          "drop_reason": {
+            "type": ["string", "null"],
+            "description": "Why it was dropped, when kept is false."
+          }
+        }
+      }
+    },
+    "quotes": {
+      "type": "array",
+      "description": "Every quote the task requested.",
+      "items": {
+        "type": "object",
+        "required": ["quote_id", "created_at", "expires_at", "delivery_date", "currency", "options"],
+        "properties": {
+          "quote_id": { "$ref": "#/$defs/id", "description": "quote_id from the quote result." },
+          "created_at": { "type": "string", "format": "date-time", "description": "Server created_at." },
+          "expires_at": { "type": "string", "format": "date-time", "description": "Server expires_at." },
+          "delivery_date": { "type": "string", "format": "date", "description": "Quoted delivery date." },
+          "currency": { "type": "string", "description": "Currency of every price, e.g. EUR." },
+          "purpose": { "type": ["string", "null"], "description": "Purpose frozen on the quote." },
+          "options": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/option" },
+            "description": "The quote's ranked options."
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "Each dialog shown to the buyer, with the answer.",
+      "items": {
+        "type": "object",
+        "required": ["header", "question", "options", "answer"],
+        "properties": {
+          "header": { "type": "string", "description": "Short dialog header, e.g. 'Substitute'." },
+          "question": { "type": "string", "description": "The question text." },
+          "options": {
+            "type": "array",
+            "description": "The options offered.",
+            "items": {
+              "type": "object",
+              "required": ["label", "description", "recommended"],
+              "properties": {
+                "label": { "type": "string", "description": "Option label." },
+                "description": { "type": "string", "description": "Option description." },
+                "recommended": { "type": "boolean", "description": "Whether the agent recommended it." }
+              }
+            }
+          },
+          "answer": {
+            "type": ["string", "null"],
+            "description": "The label the buyer picked, or null if they dismissed the dialog."
+          },
+          "free_text": { "type": ["string", "null"], "description": "What the buyer typed, if anything." }
+        }
+      }
+    },
+    "decision": {
+      "description": "Which option the agent chose and why, or null when no choice was made.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["rule", "chosen", "reason"],
+          "properties": {
+            "rule": {
+              "enum": ["cheapest_covering", "buyer_choice", "split", "no_order"],
+              "description": "The rule that decided."
+            },
+            "chosen": {
+              "type": "array",
+              "description": "The chosen lines.",
+              "items": {
+                "type": "object",
+                "required": ["product_id", "quantity"],
+                "properties": {
+                  "product_id": { "$ref": "#/$defs/id", "description": "Chosen product id." },
+                  "quantity": { "type": "number", "description": "Quantity in sales units." },
+                  "substitute_for": {
+                    "type": ["string", "null"],
+                    "description": "The product this line substitutes, if any."
+                  }
+                }
+              }
+            },
+            "reason": { "type": "string", "description": "The place_order reason." }
+          }
+        }
+      ]
+    },
+    "orders": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/order" },
+      "description": "The final known state of every order this task touched."
+    },
+    "errors": {
+      "type": "array",
+      "description": "Every refused call and what the agent changed.",
+      "items": {
+        "type": "object",
+        "required": ["tool", "code", "message", "handling"],
+        "properties": {
+          "at": { "type": ["string", "null"], "format": "date-time", "description": "When it happened." },
+          "tool": { "type": "string", "description": "The tool that refused." },
+          "code": { "type": "string", "description": "The error code, e.g. quote_changed." },
+          "message": { "type": "string", "description": "The error message." },
+          "handling": { "type": "string", "description": "What the agent did next." }
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/timeline_entry" },
+      "description": "Events in order; seq starts at 1 and increases by 1."
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["tool_calls", "quotes", "buyer_questions"],
+      "description": "Header figures, computed only from figures already in this document.",
+      "properties": {
+        "tool_calls": { "type": "integer", "minimum": 0, "description": "Valio Aimo tool calls made." },
+        "quotes": { "type": "integer", "minimum": 0, "description": "Number of quotes." },
+        "buyer_questions": { "type": "integer", "minimum": 0, "description": "Dialogs shown to the buyer." },
+        "total_excl_vat": {
+          "type": ["number", "null"],
+          "description": "Sum of the task's non-cancelled orders, excl. VAT."
+        },
+        "co2_kg_total": { "type": ["number", "null"], "description": "CO2-eq kg of the chosen lines." },
+        "savings_vs_next_option_eur": {
+          "type": ["number", "null"],
+          "description": "Chosen total minus the next covering option's total, as a positive saving."
+        }
+      }
+    },
+    "narrative": {
+      "type": "object",
+      "required": ["what_happened", "why"],
+      "description": "Short plain text, no Markdown.",
+      "properties": {
+        "what_happened": { "type": "string", "description": "What the agent did." },
+        "why": { "type": "string", "description": "Why the chosen option won." },
+        "watch_out": { "type": ["string", "null"], "description": "Anything the buyer should keep an eye on." }
+      }
+    },
+    "next_steps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "What remains to do, e.g. 'Approve ord_… in the order console'."
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "option": {
+      "type": "object",
+      "description": "One quote option, with the server's QuoteOption field names.",
+      "required": ["rank", "product_id", "name", "quantity", "unit_price", "line_total", "covers_request", "chosen"],
+      "properties": {
+        "rank": { "type": "integer", "minimum": 1, "description": "Server rank." },
+        "product_id": { "$ref": "#/$defs/id", "description": "Catalog product id." },
+        "name": { "type": "string", "description": "Product name." },
+        "brand": { "type": ["string", "null"], "description": "Brand." },
+        "sales_unit": { "type": ["string", "null"], "description": "Sales unit code, e.g. KI or ST." },
+        "content_per_sales_unit": { "type": ["string", "null"], "description": "What one sales unit holds." },
+        "requested": { "type": ["string", "null"], "description": "What was asked for, e.g. '1000 L'." },
+        "quantity": { "type": ["number", "null"], "description": "Quantity in sales units." },
+        "conversion": { "type": ["string", "null"], "description": "How the amount became sales units." },
+        "unit_price": { "type": ["number", "null"], "description": "Fixed price per sales unit, excl. VAT." },
+        "line_total": { "type": ["number", "null"], "description": "Line total, excl. VAT." },
+        "covers_request": { "type": ["boolean", "null"], "description": "Quantity available by the date." },
+        "meets_requirements": { "type": ["boolean", "null"], "description": "Meets every requirement." },
+        "missing_requirements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Requirements the product misses."
+        },
+        "breaks_mandate": { "type": ["boolean", "null"], "description": "Placing it would be refused." },
+        "delivery_reliability": { "type": ["number", "null"], "description": "Historical on-time ratio 0-1." },
+        "co2_kg_total": { "type": ["number", "null"], "description": "CO2-eq kg for the line." },
+        "cheapest_covering_option": {
+          "type": ["boolean", "null"],
+          "description": "Server's cheapest covering option."
+        },
+        "chosen": { "type": "boolean", "description": "Whether the agent ordered this option." }
+      }
+    },
+    "order": {
+      "type": "object",
+      "description": "An order's final known state.",
+      "required": ["order_id", "status", "total", "currency", "delivery_date", "approval_reasons"],
+      "properties": {
+        "order_id": { "$ref": "#/$defs/id", "description": "Server order_id." },
+        "client_reference": { "type": ["string", "null"], "description": "The agent's client_reference." },
+        "quote_id": { "type": ["string", "null"], "description": "The quote it was placed from." },
+        "status": {
+          "enum": ["placed", "pending_approval", "approved", "rejected", "shipped", "cancelled"],
+          "description": "Last known order status."
+        },
+        "total": { "type": "number", "description": "The order's total, excl. VAT, as the server returns it." },
+        "currency": { "type": "string", "description": "Currency, e.g. EUR." },
+        "delivery_date": { "type": "string", "format": "date", "description": "Delivery date." },
+        "approval_reasons": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Why a human had to approve; empty when placed autonomously."
+        },
+        "decision": {
+          "description": "The human's decision, if any.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["decision", "reason"],
+              "properties": {
+                "decision": { "enum": ["approved", "rejected"], "description": "The outcome." },
+                "reason": { "type": "string", "description": "The human's reason." },
+                "decided_by": {
+                  "type": ["string", "null"],
+                  "description": "decision.decided_by.agent_id, or null when the system closed it."
+                },
+                "confirmed_via": {
+                  "type": ["string", "null"],
+                  "description": "How the human confirmed: mcp_elicitation or rest."
+                }
+              }
+            }
+          ]
+        },
+        "cancellation": {
+          "description": "The cancellation, if any.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["reason", "cancelled_by", "confirmed_via"],
+              "properties": {
+                "reason": { "type": "string", "description": "Why it was cancelled." },
+                "cancelled_by": { "type": ["string", "null"], "description": "cancelled_by.agent_id." },
+                "confirmed_via": {
+                  "type": ["string", "null"],
+                  "description": "agent, rest, mcp_elicitation or replacement."
+                },
+                "replaced_by": { "type": ["string", "null"], "description": "The replacing order_id." }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "timeline_entry": {
+      "type": "object",
+      "required": ["seq", "type", "title"],
+      "description": "One event.",
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1, "description": "Position, from 1." },
+        "at": { "type": ["string", "null"], "format": "date-time", "description": "When, if known." },
+        "type": {
+          "enum": ["authority", "search", "quote", "question", "answer", "order", "approval", "cancel", "error", "report"],
+          "description": "Event type."
+        },
+        "title": { "type": "string", "description": "One-line description." },
+        "tool": { "type": ["string", "null"], "description": "The tool called, if any." },
+        "refs": {
+          "type": ["object", "null"],
+          "description": "Ids this event touched; each must appear in quotes, orders or candidates.",
+          "properties": {
+            "quote_id": { "type": ["string", "null"], "description": "A quote_id from quotes." },
+            "order_id": { "type": ["string", "null"], "description": "An order_id from orders." },
+            "product_ids": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Product ids."
+            }
+          }
+        }
+      }
+    }
+  }
+}

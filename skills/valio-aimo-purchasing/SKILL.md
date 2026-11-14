@@ -1,6 +1,6 @@
 ---
 name: valio-aimo-purchasing
-description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form, and cancel or replace orders until they ship. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday").
+description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form, and cancel or replace orders until they ship, and write a JSON journal of each task. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday").
 ---
 
 # Valio Aimo purchasing
@@ -158,6 +158,25 @@ Give the buyer: product name and id, quantity in sales units and in their unit (
 "100 cases of 10 L = 1,000 L"), unit price, total excl. VAT, delivery date, order status and any
 approval reasons. Offer the audit trail from `get_order_audit` when asked what you did and why.
 
+### 8. Write the journal
+
+After your final report, write one JSON journal of the task. Do this for every task this skill
+handles: a purchase, a decision on a pending order, a cancel or replace, and a task that ended with
+no order or with an error you could not fix.
+
+- Path: `valio-aimo-journal/YYYY-MM-DD-HHMM-<slug>.json` in the working directory, from
+  `finished_at` in Europe/Helsinki, read from the host clock right before you write, `<slug>` from the title in kebab case, `-2`, `-3` on a collision. Never
+  overwrite another journal.
+- Follow `references/journal.schema.json`. `references/journal.md` says where each field comes from,
+  and `references/journal-example.json` shows a full one.
+- Copy figures, ids and statuses from tool results. Use `null` for anything you do not know. Never
+  write secrets.
+- Record the buyer's dialog answers, every refused call with its code, and why the chosen option won.
+- The server's audit trail is the record of truth; the journal is your account of the task.
+- Tell the buyer the file path in one line. If the buyer asked not to keep a journal, skip it and
+  say `Journal skipped at the buyer's request.` If the host cannot write files, say so in one line
+  and do not print the JSON instead.
+
 ## Deciding an order over the spend limit
 
 You can decide the company's `pending_approval` orders, including ones you placed yourself.
@@ -190,6 +209,9 @@ How a decision works:
   `decision_cancelled`, say the order is still waiting for approval and do not open the form again
   unless the human asks.
 
+This task ends with step 8 too, with `kind: decision` (or `purchase` when you placed the order in
+the same task).
+
 On MCP the audit records `confirmed_via: mcp_elicitation`. Over REST there is no form: the server
 records `confirmed_via: rest` and cannot prove a human said yes, so that check is your job there.
 
@@ -215,7 +237,8 @@ cannot.
   Aimo customer service, and do not retry.
 
 Report the resulting status and `cancellation` (reason, who cancelled, `confirmed_via`, and
-`replaced_by` when set).
+`replaced_by` when set). Then write the journal (step 8) with `kind: cancel`, or
+`kind: replace` when the task placed a replacement order.
 
 ## Errors
 
@@ -260,3 +283,6 @@ Do not retry the same failing call in a loop. Each code above says what to chang
   availability in tool results.
 - `references/worked-example.md`: the 1,000 L lactose-free milk request from start to finish,
   including a substitute choice dialog.
+- `references/journal.md`: where the step 8 journal goes and where each field comes from.
+- `references/journal.schema.json`: the journal's JSON Schema (`schema_version` 1).
+- `references/journal-example.json`: the journal for the worked example.

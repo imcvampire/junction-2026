@@ -1,0 +1,205 @@
+{
+  "schema": "valio-aimo-journal",
+  "schema_version": 1,
+  "journal_id": "3f6b2a9e-1c4d-4e8a-9b7f-2d5c8e0a1b34",
+  "title": "1,000 L lactose-free milk for Mon 16 Nov",
+  "summary": "Ordered 100 cases (1,000 L) of Valio lactose-free skimmed milk for 1,540.00 EUR; the buyer approved it over the 500 EUR limit.",
+  "kind": "purchase",
+  "outcome": "approved",
+  "started_at": "2026-11-13T09:12:04+02:00",
+  "finished_at": "2026-11-13T09:16:41+02:00",
+  "agent": {
+    "agent_id": "agt_mcp",
+    "customer": "example-customer",
+    "host": "Claude Code",
+    "model": null
+  },
+  "authority": {
+    "spend_limit_eur": 500,
+    "required_tags": [],
+    "banned_allergens": []
+  },
+  "request": {
+    "text": "I need 1,000 litres of lactose-free milk by Monday. Find an option that meets our requirements based on price and availability.",
+    "delivery_date": "2026-11-16",
+    "amount": { "value": 1000, "unit": "L" },
+    "quantity": null,
+    "requirements": ["LACTOSE_FREE"],
+    "purpose": null
+  },
+  "searches": [
+    {
+      "query": "milk 1 l",
+      "required_tags": ["LACTOSE_FREE"],
+      "exclude_allergens": [],
+      "result_count": 10
+    }
+  ],
+  "candidates": [
+    {
+      "product_id": "464119",
+      "name": "Valio skimmed milk 1 l lactose free UHT",
+      "source": "search",
+      "kept": true,
+      "drop_reason": null
+    },
+    {
+      "product_id": "464073",
+      "name": "Valio whole milk 1 l lactose free UHT",
+      "source": "search",
+      "kept": true,
+      "drop_reason": null
+    },
+    {
+      "product_id": "464201",
+      "name": "Valio semi skimmed milk 1 l lactose free UHT",
+      "source": "search",
+      "kept": true,
+      "drop_reason": null
+    }
+  ],
+  "quotes": [
+    {
+      "quote_id": "q_example",
+      "created_at": "2026-11-13T09:13:30+02:00",
+      "expires_at": "2026-11-13T09:28:30+02:00",
+      "delivery_date": "2026-11-16",
+      "currency": "EUR",
+      "purpose": null,
+      "options": [
+        {
+          "rank": 1,
+          "product_id": "464119",
+          "name": "Valio skimmed milk 1 l lactose free UHT",
+          "brand": "Valio",
+          "sales_unit": "KI",
+          "content_per_sales_unit": "10 L",
+          "requested": "1000 L",
+          "quantity": 100,
+          "conversion": "1000 L / 10 L per KI = 100 -> 100 KI",
+          "unit_price": 15.4,
+          "line_total": 1540.0,
+          "covers_request": true,
+          "meets_requirements": true,
+          "missing_requirements": [],
+          "breaks_mandate": false,
+          "delivery_reliability": null,
+          "co2_kg_total": null,
+          "cheapest_covering_option": true,
+          "chosen": true
+        },
+        {
+          "rank": 2,
+          "product_id": "464073",
+          "name": "Valio whole milk 1 l lactose free UHT",
+          "brand": "Valio",
+          "sales_unit": "ST",
+          "content_per_sales_unit": "1 L",
+          "requested": "1000 L",
+          "quantity": 1000,
+          "conversion": "1000 L / 1 L per ST = 1000 -> 1000 ST",
+          "unit_price": 1.89,
+          "line_total": 1890.0,
+          "covers_request": true,
+          "meets_requirements": true,
+          "missing_requirements": [],
+          "breaks_mandate": false,
+          "delivery_reliability": null,
+          "co2_kg_total": null,
+          "cheapest_covering_option": false,
+          "chosen": false
+        }
+      ]
+    }
+  ],
+  "questions": [],
+  "decision": {
+    "rule": "cheapest_covering",
+    "chosen": [{ "product_id": "464119", "quantity": 100, "substitute_for": null }],
+    "reason": "Cheapest lactose-free milk that covers 1,000 L by 2026-11-16; 350 EUR below the next option."
+  },
+  "orders": [
+    {
+      "order_id": "ord_example",
+      "client_reference": "8f0c2c1e-6c9e-4a43-9a51-0d7b2a4b1f10",
+      "quote_id": "q_example",
+      "status": "approved",
+      "total": 1540.0,
+      "currency": "EUR",
+      "delivery_date": "2026-11-16",
+      "approval_reasons": ["Total 1540.00 EUR exceeds the 500.00 EUR per-order spend limit"],
+      "decision": {
+        "decision": "approved",
+        "reason": "For the gala dinner",
+        "decided_by": "agt_mcp",
+        "confirmed_via": "mcp_elicitation"
+      },
+      "cancellation": null
+    }
+  ],
+  "errors": [],
+  "timeline": [
+    {
+      "seq": 1,
+      "at": null,
+      "type": "authority",
+      "title": "Read authority: 500 EUR per-order limit, no mandate tags",
+      "tool": "whoami",
+      "refs": null
+    },
+    {
+      "seq": 2,
+      "at": null,
+      "type": "search",
+      "title": "Searched 'milk 1 l' with LACTOSE_FREE; kept 3 drinking milks",
+      "tool": "search_products",
+      "refs": { "product_ids": ["464119", "464073", "464201"] }
+    },
+    {
+      "seq": 3,
+      "at": "2026-11-13T09:13:30+02:00",
+      "type": "quote",
+      "title": "Quoted 1,000 L for Mon 16 Nov; 2 options cover it",
+      "tool": "quote",
+      "refs": { "quote_id": "q_example", "product_ids": ["464119", "464073", "464201"] }
+    },
+    {
+      "seq": 4,
+      "at": null,
+      "type": "order",
+      "title": "Placed 100 KI of 464119 for 1,540.00 EUR; pending approval over the 500 EUR limit",
+      "tool": "place_order",
+      "refs": { "quote_id": "q_example", "order_id": "ord_example", "product_ids": ["464119"] }
+    },
+    {
+      "seq": 5,
+      "at": "2026-11-13T09:16:20+02:00",
+      "type": "approval",
+      "title": "Buyer approved in the server form: 'For the gala dinner'",
+      "tool": "approve_order",
+      "refs": { "order_id": "ord_example" }
+    },
+    {
+      "seq": 6,
+      "at": null,
+      "type": "report",
+      "title": "Reported the approved order to the buyer",
+      "tool": null,
+      "refs": { "order_id": "ord_example" }
+    }
+  ],
+  "metrics": {
+    "tool_calls": 5,
+    "quotes": 1,
+    "buyer_questions": 0,
+    "total_excl_vat": 1540.0,
+    "co2_kg_total": null,
+    "savings_vs_next_option_eur": 350.0
+  },
+  "narrative": {
+    "what_happened": "Searched the catalog for lactose-free 1 l milks, quoted three for 1,000 L by Monday 16 November, and ordered the cheapest option that covered the full amount. The total was over the 500 EUR spend limit, so the order went to the buyer, who approved it in the server's form.",
+    "why": "464119 covers all 1,000 L by the date, meets the lactose-free requirement, and is 350 EUR cheaper than the next covering option, 464073.",
+    "watch_out": null
+  },
+  "next_steps": []
+}

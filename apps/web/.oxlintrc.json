@@ -1,0 +1,15 @@
+{
+  "plugins": ["react", "typescript", "unicorn", "oxc", "import", "vitest"],
+  "categories": { "correctness": "error" },
+  "env": { "browser": true },
+  "ignorePatterns": [
+    "dist",
+    "src/routeTree.gen.ts",
+    "src/features/journal-viewer/journal.types.ts"
+  ],
+  "rules": {
+    "react/no-danger": "error",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn"
+  }
+}

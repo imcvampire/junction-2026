@@ -67,7 +67,9 @@ Rules for using the data:
 ## Commands
 
 Tasks are defined in `mise.toml`: `mise run install`, `mise run dev` (API on port
-8000, MCP at `/mcp`), `mise run check` (lint, typecheck and test), `mise run fmt`, and
-`mise run skill:sandbox`. The API has no authentication: every MCP and REST client acts as one shared
+8000, MCP at `/mcp`, and the web app on port 5173), `mise run check` (lint, typecheck and test for
+both apps), `mise run fmt`, `mise run build:web`, and `mise run skill:sandbox`. The API has no authentication: every MCP and REST client acts as one shared
 agent of `API_VALIO_CUSTOMER`. For focused API tests, run `uv run pytest tests/test_<area>.py` inside
-`apps/api`.
+`apps/api`; for web tests, run `pnpm test <path>` inside `apps/web`. After changing
+`journal.schema.json`, run `pnpm gen:journal-types` in `apps/web` (a test fails while the generated
+types are stale).

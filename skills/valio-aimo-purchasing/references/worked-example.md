@@ -93,6 +93,14 @@ naming your own agent. If they decline or dismiss the form, the tool returns `de
 say the order is still waiting and do not call again unless they ask. If the host cannot show forms
 (`elicitation_required`), send the buyer to the order console.
 
+## 7. Journal
+
+After the report, write the journal (SKILL.md step 8) to
+`valio-aimo-journal/2026-11-13-0916-1000-l-lactose-free-milk-for-mon-16-nov.json` and tell the
+buyer the path in one line. `journal-example.json` is that file: the search, the quote with both
+options, 464119 chosen by `cheapest_covering`, and the order approved with the buyer's reason
+`For the gala dinner` through `mcp_elicitation`.
+
 ## If the price moves
 
 Before an order exists: if `place_order` returns `quote_changed` with

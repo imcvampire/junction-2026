@@ -1,22 +1,33 @@
 [tools]
+node = "26"
+pnpm = "12"
 python = "3.13"
 uv = "0.12"
 
 [env]
 _.file = { path = ".env", redact = true }
 API_PORT = "8000"
+WEB_PORT = "5173"
 
 [tasks.install]
-description = "Install API dependencies"
+description = "Install API and web dependencies"
 depends = ["install:*"]
+
+[tasks."install:web"]
+dir = "apps/web"
+run = "pnpm install --frozen-lockfile"
 
 [tasks."install:api"]
 dir = "apps/api"
 run = "uv sync --locked"
 
 [tasks.dev]
-description = "Run the API dev server"
+description = "Run the API and web dev servers"
 depends = ["dev:*"]
+
+[tasks."dev:web"]
+dir = "apps/web"
+run = "pnpm dev"
 
 [tasks."dev:api"]
 dir = "apps/api"
@@ -33,12 +44,20 @@ depends = ["lint", "typecheck", "test"]
 [tasks.lint]
 depends = ["lint:*"]
 
+[tasks."lint:web"]
+dir = "apps/web"
+run = ["pnpm lint", "pnpm fmt:check"]
+
 [tasks."lint:api"]
 dir = "apps/api"
 run = ["uv run ruff check .", "uv run ruff format --check ."]
 
 [tasks.typecheck]
 depends = ["typecheck:*"]
+
+[tasks."typecheck:web"]
+dir = "apps/web"
+run = "pnpm typecheck"
 
 [tasks."typecheck:api"]
 dir = "apps/api"
@@ -47,11 +66,27 @@ run = "uv run pyright"
 [tasks.test]
 depends = ["test:*"]
 
+[tasks."test:web"]
+dir = "apps/web"
+run = "pnpm test"
+
 [tasks."test:api"]
 dir = "apps/api"
 run = "uv run pytest"
 
 [tasks.fmt]
-description = "Auto-fix Python lint and formatting"
+description = "Auto-fix lint and formatting"
+depends = ["fmt:*"]
+
+[tasks."fmt:api"]
 dir = "apps/api"
 run = ["uv run ruff check --fix .", "uv run ruff format ."]
+
+[tasks."fmt:web"]
+dir = "apps/web"
+run = ["pnpm lint --fix", "pnpm fmt"]
+
+[tasks."build:web"]
+description = "Build the web app into apps/web/dist"
+dir = "apps/web"
+run = "pnpm build"

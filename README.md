@@ -13,13 +13,15 @@ The dataset in `apps/api/data/` is mock data for Junction 2026 only.
 
 ## Run the project
 
-You need [mise](https://mise.jdx.dev). It installs Python and uv and loads `.env` into every task.
+You need [mise](https://mise.jdx.dev). It installs Python, uv, Node and pnpm and loads `.env` into
+every task.
 
 ```sh
-mise install                 # Python and uv
+mise install                 # Python, uv, Node and pnpm
 cp .env.example .env         # then set API_VALIO_API_KEY (challenge API key; never commit it)
-mise run install             # API dependencies
-mise run dev                 # API on http://127.0.0.1:8000, MCP at /mcp, REST docs at /api/docs
+mise run install             # API and web dependencies
+mise run dev                 # API on http://127.0.0.1:8000 (MCP at /mcp, REST docs at /api/docs)
+                             # and the web app on http://localhost:5173
 ```
 
 Without `API_VALIO_API_KEY` the server still starts, but quote and order calls fail with
@@ -30,8 +32,20 @@ Checks:
 ```sh
 mise run check               # lint, typecheck and tests
 mise run fmt                 # auto-fix lint and formatting
-cd apps/api && uv run pytest tests/test_<area>.py   # one test file
+cd apps/api && uv run pytest tests/test_<area>.py   # one API test file
+cd apps/web && pnpm test src/features/journal-viewer # one web test folder
 ```
+
+## Web app
+
+`apps/web` (Vite, React, shadcn/ui, TanStack Router) is the home of the order console. Each
+feature is one route file in `apps/web/src/routes/` plus a folder in `apps/web/src/features/`.
+`mise run dev` serves it on http://localhost:5173 and proxies `/api` to the API.
+
+- [Journal viewer](http://localhost:5173/journal-viewer): open one purchasing journal JSON file
+  that the agent wrote and read it top-down. The file is checked against
+  [`journal.schema.json`](skills/valio-aimo-purchasing/references/journal.schema.json) in the
+  browser and never uploaded. A file that fails shows why, with the schema error paths.
 
 ## Test the agent with Claude Code
 
