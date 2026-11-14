@@ -2,7 +2,8 @@
 
 The app runs on one Verda CPU instance. Terraform in [`infra/terraform`](../infra/terraform)
 provisions the instance, and [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
-provisions and ships on every push to `master`. Nothing has to run on a laptop.
+provisions and ships on every push to `master`. Both jobs run on CRACI GitHub Actions runners.
+Nothing has to run on a laptop.
 
 ```text
 push to master
@@ -48,6 +49,20 @@ such as HCP Terraform or S3. Change the `backend` block in `versions.tf` and run
 `terraform init -migrate-state`.
 
 ## One-time setup
+
+### CRACI
+
+Connect the GitHub organization or repository to CRACI before running the workflow:
+
+1. In CRACI, open **Settings → Builds** and start **Install GitHub**.
+2. Install the CRACI GitHub App for this repository (or the whole organization).
+3. Confirm the connection is configured, then run the Deploy workflow from GitHub Actions.
+
+The workflow uses `runs-on: craci` for both Terraform and app deployment. CRACI is the runner;
+GitHub Actions still orchestrates the jobs and deployment. The deploy job needs outbound network
+access for package/provider downloads, SSH to the Verda host, and HTTPS smoke tests. CRACI's
+default runner template permits unmatched outbound traffic; if you switch to a restrictive
+network policy, allow those destinations and the required package sources.
 
 Repository secrets (`gh secret set NAME`, which reads the value from stdin):
 
