@@ -49,9 +49,9 @@
 
   <rect x="74" y="180" width="180" height="70" rx="12" fill="url(#blue)"/>
   <text font-family="ui-monospace, SFMono-Regular, monospace" font-size="10" fill="#dbe6fb">
-    <tspan x="86" y="200">search_products ✓</tspan>
-    <tspan x="86" y="216">quote · 3 options ✓</tspan>
-    <tspan x="86" y="232">place_order → approval</tspan>
+    <tspan x="86" y="200">catalog search ✓</tspan>
+    <tspan x="86" y="216">live quote · 3 options ✓</tspan>
+    <tspan x="86" y="232">order → approval</tspan>
   </text>
 
   <rect x="50" y="262" width="120" height="30" rx="10" fill="#e7f8ee"/>

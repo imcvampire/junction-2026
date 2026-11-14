@@ -33,17 +33,17 @@ const FLOW = [
   {
     icon: PackageSearchIcon,
     title: "Search",
-    body: "search_products narrows 17,000+ catalog items by name, tag, allergen and category.",
+    body: "Narrow 17,000+ catalog items by name, tag, allergen and category.",
   },
   {
     icon: ReceiptIcon,
     title: "Quote",
-    body: "quote fetches live customer prices and stock for a short list and converts litres into sales units.",
+    body: "Get live customer prices and stock for a short list, with litres converted into sales units.",
   },
   {
     icon: TruckIcon,
     title: "Order",
-    body: "place_order buys at the quoted, fixed prices. No negotiation, no price drift.",
+    body: "Buy at the quoted, fixed prices. No negotiation, no price drift.",
   },
   {
     icon: ShieldCheckIcon,
@@ -329,10 +329,10 @@ export function HomePage() {
               </p>
               <CodeBlock code={REFERENCE_REQUEST} label="reference request" />
               <p className="text-sm text-muted-foreground">
-                Expect <code className="font-mono text-xs">whoami</code>, a
-                product search, a quote of a short list, and an order. Over the
-                spend limit it comes back pending approval, and you decide in
-                the server's form. Review it later in the{" "}
+                Expect the agent to check its spend limit, search the catalog,
+                quote a short list, and place an order. Over the spend limit it
+                comes back pending approval, and you decide in the server's
+                form. Review it later in the{" "}
                 <Link
                   to="/orders"
                   className="text-foreground underline underline-offset-4"
