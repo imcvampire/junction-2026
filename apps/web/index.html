@@ -4,11 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Understand your Valio Aimo purchases, product choices and buyer approvals. Purchase records are reviewed locally in your browser."
-    />
-    <title>Valio Aimo | Purchase Overview</title>
+    <title>Valio</title>
+    <!-- three.js for the AR storage model (loaded on demand, see features/orders/storage/ar.ts) -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

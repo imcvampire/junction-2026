@@ -21,7 +21,9 @@ from api.catalog.index import Catalog
 from api.config import Settings
 from api.main import create_app
 from api.mcp.server import TOOL_NAMES
+from api.research.service import WebSearch
 from tests.conftest import DELIVERY, FakeValio
+from tests.test_research import FakeSearch
 
 SKILL_DIR = Path(__file__).resolve().parents[3] / "skills" / "valio-aimo-purchasing"
 Body = Callable[[ClientSession, FastAPI], Awaitable[None]]
@@ -73,8 +75,17 @@ async def serving(app: FastAPI) -> AsyncGenerator[None]:
         await task
 
 
-def run_mcp(settings: Settings, catalog: Catalog, fake: FakeValio, body: Body, human: Human | None = None) -> None:
-    app = create_app(settings, catalog=catalog, valio_transport=httpx.MockTransport(fake.handler))
+def run_mcp(
+    settings: Settings,
+    catalog: Catalog,
+    fake: FakeValio,
+    body: Body,
+    human: Human | None = None,
+    web_search: WebSearch | None = None,
+) -> None:
+    app = create_app(
+        settings, catalog=catalog, valio_transport=httpx.MockTransport(fake.handler), web_search=web_search
+    )
 
     async def main() -> None:
         async with serving(app), mcp_session(app, human) as session:
@@ -134,6 +145,9 @@ def test_tools_are_listed_with_schemas_and_annotations(
         place = tools["place_order"].annotations
         assert place and place.idempotentHint and not place.destructiveHint
         assert {"quote_id", "lines", "reason", "client_reference"} <= set(tools["place_order"].inputSchema["required"])
+        for name in ("research_substitutes", "research_recipe"):
+            web = tools[name].annotations
+            assert web and web.readOnlyHint and web.openWorldHint and not web.destructiveHint
 
     run_mcp(settings, catalog, fake_valio, body)
 
@@ -170,6 +184,7 @@ def test_reference_request_escalates_then_approval_is_visible(
         assert structured(decided)["decision"]["reason"] == "gala dinner"
         form = human.asked[0]
         assert order["order_id"] in form.message and "1540.00 EUR" in form.message and "spend limit" in form.message
+        assert "title" not in form.requestedSchema
         props = form.requestedSchema["properties"]
         assert props["decision"]["default"] == "approve" and props["decision"]["enum"] == ["approve", "reject"]
         assert props["reason"]["default"] == "gala"
@@ -282,6 +297,8 @@ def test_skill_mentions_only_real_tools() -> None:
         "approve_order",
         "reject_order",
         "cancel_order",
+        "research_substitutes",
+        "research_recipe",
         "get_order_status",
         "create_order_draft",
         "agree_order",
@@ -499,6 +516,7 @@ def test_an_approved_order_is_cancelled_by_the_human_in_the_form(
         assert res["cancellation"]["confirmed_via"] == "mcp_elicitation"
         form = human.asked[1]
         assert "Cancel approved order" in form.message and "undoes the approval" in form.message
+        assert "title" not in form.requestedSchema
         assert form.requestedSchema["properties"]["reason"]["default"] == "buyer says the gala is off"
         audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
         assert audit["entries"][-1]["actor"] == "approver"
@@ -557,3 +575,50 @@ def test_a_blank_replacement_still_asks_the_human(settings: Settings, catalog: C
         assert res["cancellation"]["reason"] == "gala is off" and res["cancellation"]["replaced_by"] is None
 
     run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_research_substitutes_returns_cited_web_context(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    fake = FakeSearch()
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        args = {"product_id": "464073", "candidate_ids": ["464119"], "purpose": "coffee"}
+        result = await session.call_tool("research_substitutes", args)
+        view = structured(result)
+        assert [s["product_id"] for s in view["sources"]] == ["464073", "464119"]
+        assert view["sources"][0]["url"] == "https://arla.fi/foam"
+        assert cast(TextContent, result.content[0]).text.startswith("2 sources from 2 searches.")
+        assert structured(await session.call_tool("research_substitutes", args))["cached"] is True
+        assert len(fake.queries) == 2
+
+    run_mcp(settings, catalog, fake_valio, body, web_search=fake)
+
+
+def test_research_refusals_are_tool_errors_with_codes(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        args = {"product_id": "464073", "candidate_ids": ["464119"], "purpose": "coffee"}
+        assert error_body(await session.call_tool("research_substitutes", args))["code"] == "research_not_configured"
+        unknown = await session.call_tool("research_substitutes", args | {"candidate_ids": ["999999"]})
+        assert error_body(unknown)["code"] == "unknown_product"
+        bad = await session.call_tool("research_substitutes", args | {"purpose": "x" * 41})
+        assert error_body(bad)["code"] == "invalid_arguments"
+
+    run_mcp(settings, catalog, fake_valio, body)
+
+
+def test_research_recipe_returns_cited_web_context(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+    fake = FakeSearch()
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        result = await session.call_tool("research_recipe", {"dish": "lohikeitto", "language": "fi"})
+        view = structured(result)
+        assert view["query"] == "lohikeitto resepti ainekset" and view["sources"][0]["url"] == "https://arla.fi/foam"
+        assert cast(TextContent, result.content[0]).text.startswith("1 recipe sources for 'lohikeitto'.")
+        bad = await session.call_tool("research_recipe", {"dish": "soup for 200"})
+        assert error_body(bad)["code"] == "invalid_arguments"
+        assert fake.queries == ["lohikeitto resepti ainekset"]
+
+    run_mcp(settings, catalog, fake_valio, body, web_search=fake)

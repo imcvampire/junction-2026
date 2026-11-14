@@ -1,3 +1,5 @@
+import { RecipeList } from "./recipe-list"
+import { ResearchList } from "./research-list"
 import type { ValioAimoJournal } from "../journal.types"
 import { redactSecrets } from "../evidence"
 import { PurchaseOutcome, TrustVerification } from "./dashboard"
@@ -20,6 +22,8 @@ export function JournalView({ journal }: { journal: ValioAimoJournal }) {
         <PurchaseStory journal={safe} />
       </div>
       <JournalTimeline journal={safe} title="Purchasing Journey" />
+      <RecipeList recipes={safe.recipes} />
+      <ResearchList research={safe.research} />
       <QuoteTables journal={safe} />
       <PurchasingDecisions journal={safe} />
       <TrustVerification journal={safe} />

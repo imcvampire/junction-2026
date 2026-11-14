@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Skill and journal: research is mandatory before substitutes"
-status: pending
+status: completed
 effort: 1.5h
 depends_on: [1]
 ---

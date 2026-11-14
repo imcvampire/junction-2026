@@ -57,7 +57,8 @@ Databases created while agent keys existed keep their `agents` table; the server
 Connect Claude Code:
 
 ```sh
-claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp
+claude mcp add --transport http valio-aimo https://95.133.252.52.sslip.io/mcp   # live deployment
+claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp           # local mise run dev
 ```
 
 ## Operations

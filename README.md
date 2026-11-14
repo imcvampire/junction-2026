@@ -8,6 +8,7 @@ the [`valio-aimo-purchasing`](skills/valio-aimo-purchasing/SKILL.md) skill.
 - Challenge brief: [`project.md`](project.md)
 - Goals and acceptance criteria: [`docs/project-goals.md`](docs/project-goals.md)
 - API, MCP tools, errors and approval: [`docs/backend-api.md`](docs/backend-api.md)
+- Deploying to Verda (Terraform and GitHub Actions): [`docs/deployment.md`](docs/deployment.md)
 
 The dataset in `apps/api/data/` is mock data for Junction 2026 only.
 
@@ -42,6 +43,10 @@ cd apps/web && pnpm test src/features/journal-viewer # one web test folder
 feature is one route file in `apps/web/src/routes/` plus a folder in `apps/web/src/features/`.
 `mise run dev` serves it on http://localhost:5173 and proxies `/api` to the API.
 
+- [Start page](http://localhost:5173/): how to connect the live MCP server
+  (`https://95.133.252.52.sslip.io/mcp`) and install the purchasing skill. The web image publishes
+  the skill as `/skills/valio-aimo-purchasing.tar.gz`, built from `skills/valio-aimo-purchasing` in
+  `deploy/web.Dockerfile`, so the curl install works only against a deployed site, not `pnpm dev`.
 - [Journal viewer](http://localhost:5173/journal-viewer): open one purchasing journal JSON file
   that the agent wrote and read it top-down. The file is checked against
   [`journal.schema.json`](skills/valio-aimo-purchasing/references/journal.schema.json) in the

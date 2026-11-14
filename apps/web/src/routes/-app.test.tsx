@@ -6,7 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createAppRouter } from "@/router"
 
-test("the start page redirects to the journal viewer", async () => {
+test("the start page shows how to install the MCP server and skill", async () => {
   const router = createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))
   render(
     <ThemeProvider>
@@ -19,24 +19,45 @@ test("the start page redirects to the journal viewer", async () => {
   expect(
     await screen.findByRole("heading", {
       level: 1,
-      name: "Valio Aimo | Purchase Overview",
+      name: /buy from Valio Aimo/,
     })
   ).toBeInTheDocument()
-  expect(router.state.location.pathname).toBe("/journal-viewer")
+  expect(router.state.location.pathname).toBe("/")
+  expect(
+    screen.getByText(/^Set up the Valio Aimo purchasing tools for me/)
+  ).toHaveTextContent("Do not place any orders yet.")
+  expect(
+    screen.getByText(
+      "claude mcp add --transport http --scope user valio-aimo https://95.133.252.52.sslip.io/mcp"
+    )
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText(
+      /^mkdir -p ~\/\.claude\/skills\s+curl .*valio-aimo-purchasing\.tar\.gz/
+    )
+  ).toBeInTheDocument()
 })
 
-test("developer audit route is separate and declares its lack of access control", async () => {
+test("journal redesign keeps the shared navigation and theme controls", async () => {
   const router = createAppRouter(
-    createMemoryHistory({ initialEntries: ["/developer/journal-viewer"] })
+    createMemoryHistory({ initialEntries: ["/journal-viewer"] })
   )
-  render(
-    <TooltipProvider>
-      <RouterProvider router={router} />
-    </TooltipProvider>
+  const { container } = render(
+    <ThemeProvider defaultTheme="dark">
+      <TooltipProvider>
+        <RouterProvider router={router} />
+      </TooltipProvider>
+    </ThemeProvider>
   )
+  const heading = await screen.findByRole("heading", {
+    name: "Valio Aimo | Purchase Overview",
+  })
+  expect(heading.closest(".journal-viewer-theme")).toBeInTheDocument()
+  const orders = screen.getByRole("link", { name: "Orders" })
+  expect(orders).toHaveAttribute("href", "/orders")
+  expect(orders.closest(".journal-viewer-theme")).toBeNull()
   expect(
-    await screen.findByRole("heading", { name: "Developer Purchase Audit" })
+    screen.getByRole("button", { name: /Switch to .* theme/ })
   ).toBeInTheDocument()
-  expect(screen.getByText(/not a security boundary/)).toBeInTheDocument()
-  expect(router.state.location.pathname).toBe("/developer/journal-viewer")
+  expect(container.querySelector("header .journal-viewer-theme")).toBeNull()
 })

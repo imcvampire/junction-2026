@@ -290,6 +290,11 @@ export function purchasingJourney(journal: ValioAimoJournal): JourneyStep[] {
           ["Who approved", "Buyer’s identity not recorded"],
         ]
         break
+      case "research":
+        title = "Product Research Recorded"
+        explanation = "The assistant recorded research to inform the purchase."
+        facts = [["Research", "See the recorded recipe and web research below"]]
+        break
       case "report":
         title = "Purchase Update Shared"
         explanation = "The assistant shared a purchase update with the buyer."

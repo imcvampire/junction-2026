@@ -5,6 +5,21 @@ import type { ValioAimoJournal } from "./journal.types"
 
 const fixture = () => structuredClone(example) as ValioAimoJournal
 
+test("research events remain readable in the customer journey", () => {
+  const journal = fixture()
+  journal.timeline.push({
+    seq: 100,
+    type: "research",
+    title: "research_recipe",
+  })
+  expect(
+    purchasingJourney(journal).find((step) => step.type === "research")
+  ).toMatchObject({
+    title: "Product Research Recorded",
+    explanation: "The assistant recorded research to inform the purchase.",
+  })
+})
+
 test("each missing example time inherits the latest preceding recorded time", () => {
   const j = fixture()
   const before = JSON.stringify(j)

@@ -99,6 +99,7 @@ def settings(tmp_path: Path) -> Settings:
         db_path=tmp_path / "test.sqlite3",
         valio_base_url="http://valio.test",
         valio_api_key=SecretStr("test-key"),
+        oxylabs_api_key=None,  # mise loads the real key from .env; tests must never search the web
         approval_spend_threshold_eur=500.0,
         quote_cache_ttl_s=300.0,
         mcp_allowed_hosts=["testserver", "127.0.0.1:*"],

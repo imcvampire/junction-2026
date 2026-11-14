@@ -3,26 +3,31 @@
 An [Agent Skill](https://agentskills.io) for a customer's own purchasing agent. It teaches the agent
 how to use the Valio Aimo MCP server. The server enforces every rule; the skill only guides.
 
-## Install
-
-1. Connect the MCP server (Claude Code shown; any MCP host with streamable HTTP works). It needs
-   no key: in this proof of concept every agent works for the same company, as one shared agent
-   that can buy and can pass on a human's approval or rejection of the company's escalated orders.
-
-   ```sh
-   claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp
-   ```
-
-2. Copy this folder into the host's skills directory, for example
-   `cp -r skills/valio-aimo-purchasing ~/.claude/skills/` (or `.claude/skills/` in a project).
-
 ## Files
 
 - `SKILL.md`: the procedure and the error table.
 - `references/tags-and-units.md`: how to read tags, allergens, sales units and availability in results.
 - `references/worked-example.md`: the reference request from start to finish.
+- `references/substitute-research.md`: the mandatory `research_substitutes` web check before any
+substitute is ranked or offered.
+- `references/recipe-research.md`: the `research_recipe` web search that turns a dish into an
+ingredient list the buyer confirms.
 - `references/journal.md`, `references/journal.schema.json`, `references/journal-example.json`: the
-  task journal, its JSON Schema and an example.
+task journal, its JSON Schema and an example.
+
+## Substitutes
+
+Before the agent ranks or offers a substitute, it calls `research_substitutes`. The server runs one
+Oxylabs web search per product with the catalog name and the buyer's purpose only, and returns the
+cited snippets, which the agent uses for fit, never for price or stock. Without `API_OXYLABS_API_KEY` on the server, the
+agent says web context was unavailable and ranks on catalog facts.
+
+## Dishes
+
+When the buyer names a dish to cook instead of the ingredients, the agent calls `research_recipe`.
+The server runs one Oxylabs web search with the dish name only, in a fixed query, and returns cited
+snippets. The agent builds an ingredient list from them, scales it to the buyer's servings, and has
+the buyer confirm it before it searches the catalog and quotes each ingredient.
 
 ## Journals
 

@@ -1,0 +1,262 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    paths:
+      - infra/**
+      - deploy/**
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: Destroy the Verda instance instead of deploying
+        type: boolean
+        default: false
+
+# One writer at a time: the Terraform state lives on the `tfstate` branch and has no lock of its own.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+  TF_DIR: infra/terraform
+  STATE_BRANCH: tfstate
+  STATE_FILE: terraform.tfstate.enc
+  SSH_USER: root
+  API_CONFIG: /opt/app/api-config
+
+jobs:
+  infra:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      public_ip: ${{ steps.out.outputs.public_ip }}
+    env:
+      VERDA_CLIENT_ID: ${{ secrets.VERDA_CLIENT_ID }}
+      VERDA_CLIENT_SECRET: ${{ secrets.VERDA_CLIENT_SECRET }}
+      TF_STATE_PASSPHRASE: ${{ secrets.TF_STATE_PASSPHRASE }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      TF_VAR_operator_ssh_public_keys: ${{ vars.OPERATOR_SSH_PUBLIC_KEYS || '[]' }}
+      DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.destroy }}
+      CAN_WRITE: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "~1.17"
+          terraform_wrapper: false
+
+      - name: Check required secrets
+        run: |
+          missing=()
+          for name in VERDA_CLIENT_ID VERDA_CLIENT_SECRET TF_STATE_PASSPHRASE DEPLOY_SSH_PRIVATE_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Derive deploy public key
+        run: |
+          key=$(mktemp)
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          echo "TF_VAR_deploy_ssh_public_key=$(ssh-keygen -y -f "$key")" >> "$GITHUB_ENV"
+          rm -f "$key"
+
+      - name: Restore state
+        run: |
+          if git ls-remote --exit-code --heads origin "$STATE_BRANCH" >/dev/null; then
+            git fetch --quiet --depth=1 origin "$STATE_BRANCH"
+            # Fail hard on a bad passphrase: an empty state would make Terraform create a second instance.
+            git show "FETCH_HEAD:$STATE_FILE" \
+              | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:TF_STATE_PASSPHRASE \
+              > "$RUNNER_TEMP/terraform.tfstate"
+            jq -e '.version' "$RUNNER_TEMP/terraform.tfstate" >/dev/null
+            mv "$RUNNER_TEMP/terraform.tfstate" "$TF_DIR/terraform.tfstate"
+            echo "Restored state from $STATE_BRANCH@$(git rev-parse --short FETCH_HEAD)"
+          else
+            echo "No $STATE_BRANCH branch yet; starting from empty state"
+          fi
+
+      - name: Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -lockfile=readonly
+
+      - name: Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform fmt -check -recursive
+          terraform validate
+
+      - name: Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan ${{ env.DESTROY == 'true' && '-destroy' || '' }}
+
+      - name: Apply
+        id: apply
+        if: env.CAN_WRITE == 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply tfplan
+
+      # Runs after a failed apply too: a partial apply may already have created billable resources.
+      - name: Save state
+        if: always() && (steps.apply.outcome == 'success' || steps.apply.outcome == 'failure')
+        run: |
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass env:TF_STATE_PASSPHRASE \
+            -in "$TF_DIR/terraform.tfstate" -out "$RUNNER_TEMP/$STATE_FILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          blob=$(git hash-object -w "$RUNNER_TEMP/$STATE_FILE")
+          tree=$(printf '100644 blob %s\t%s\n' "$blob" "$STATE_FILE" | git mktree)
+          parent=$(git ls-remote origin "refs/heads/$STATE_BRANCH" | cut -f1)
+          [ -z "$parent" ] || git fetch --quiet --depth=1 origin "$STATE_BRANCH"
+          commit=$(git commit-tree "$tree" ${parent:+-p "$parent"} -m "chore: terraform state for ${GITHUB_SHA::7} (run $GITHUB_RUN_ID)")
+          git push --quiet origin "$commit:refs/heads/$STATE_BRANCH"
+          echo "Saved state as $STATE_BRANCH@${commit::7}"
+
+      - name: Outputs
+        id: out
+        if: env.CAN_WRITE == 'true' && env.DESTROY != 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          ip=$(terraform output -raw public_ip)
+          echo "public_ip=$ip" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Verda instance"
+            echo "- ID: \`$(terraform output -raw instance_id)\`"
+            echo "- Public IP: \`$ip\`"
+            echo "- Price per hour: $(terraform output -raw price_per_hour)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  app:
+    name: Ship app
+    needs: infra
+    if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.destroy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ steps.site.outputs.address }}
+    env:
+      HOST: ${{ needs.infra.outputs.public_ip }}
+      RELEASE: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve site address
+        id: site
+        env:
+          SITE_ADDRESS: ${{ vars.SITE_ADDRESS }}
+        run: |
+          [ -n "$HOST" ] || { echo "::error::Terraform returned no public IP"; exit 1; }
+          echo "address=${SITE_ADDRESS:-$HOST.sslip.io}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          cat > ~/.ssh/config <<EOF
+          Host app
+            HostName $HOST
+            User $SSH_USER
+            IdentityFile ~/.ssh/deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+            ServerAliveInterval 30
+            ConnectTimeout 10
+          EOF
+          for i in $(seq 1 30); do
+            ssh app true 2>/dev/null && { echo "SSH ready"; exit 0; }
+            echo "Waiting for SSH ($i/30)"; sleep 10
+          done
+          echo "::error::SSH to $HOST did not come up"; exit 1
+
+      - name: Bootstrap host
+        run: ssh app 'bash -s' < deploy/bootstrap.sh
+
+      - name: Upload release
+        run: |
+          git archive --format=tar.gz HEAD \
+            | ssh app "set -e; d=/opt/app/releases/$RELEASE; rm -rf \$d; mkdir -p \$d; tar -xz -C \$d"
+
+      - name: Write API config
+        env:
+          SITE: ${{ steps.site.outputs.address }}
+          API_VALIO_API_KEY: ${{ secrets.API_VALIO_API_KEY }}
+          API_OXYLABS_API_KEY: ${{ secrets.API_OXYLABS_API_KEY }}
+          API_GEMINI_API_KEY: ${{ secrets.API_GEMINI_API_KEY }}
+          OPENAI_COMPATIBLE_URL: ${{ secrets.OPENAI_COMPATIBLE_URL }}
+          OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
+          OPENAI_COMPATIBLE_MODEL: ${{ secrets.OPENAI_COMPATIBLE_MODEL }}
+          API_VALIO_BASE_URL: ${{ secrets.API_VALIO_BASE_URL || vars.API_VALIO_BASE_URL || 'https://junction26.valioaimo.fi' }}
+          API_VALIO_CUSTOMER: ${{ vars.API_VALIO_CUSTOMER || 'junction-demo' }}
+          API_APPROVAL_SPEND_THRESHOLD_EUR: ${{ vars.API_APPROVAL_SPEND_THRESHOLD_EUR || '500' }}
+          API_REQUIRED_TAGS: ${{ vars.API_REQUIRED_TAGS || '[]' }}
+          API_BANNED_ALLERGENS: ${{ vars.API_BANNED_ALLERGENS || '[]' }}
+        run: |
+          [ -n "$API_VALIO_API_KEY" ] || echo "::warning::API_VALIO_API_KEY is not set; quote and order calls will fail with upstream_not_configured"
+          {
+            echo "API_LOG_LEVEL=INFO"
+            echo "API_VALIO_BASE_URL=$API_VALIO_BASE_URL"
+            echo "API_VALIO_API_KEY=$API_VALIO_API_KEY"
+            echo "API_VALIO_CUSTOMER=$API_VALIO_CUSTOMER"
+            echo "API_OXYLABS_API_KEY=$API_OXYLABS_API_KEY"
+            echo "API_GEMINI_API_KEY=$API_GEMINI_API_KEY"
+            echo "OPENAI_COMPATIBLE_URL=$OPENAI_COMPATIBLE_URL"
+            echo "OPENAI_COMPATIBLE_API_KEY=$OPENAI_COMPATIBLE_API_KEY"
+            echo "OPENAI_COMPATIBLE_MODEL=$OPENAI_COMPATIBLE_MODEL"
+            echo "API_APPROVAL_SPEND_THRESHOLD_EUR=$API_APPROVAL_SPEND_THRESHOLD_EUR"
+            echo "API_REQUIRED_TAGS=$API_REQUIRED_TAGS"
+            echo "API_BANNED_ALLERGENS=$API_BANNED_ALLERGENS"
+            echo "API_MCP_ALLOWED_HOSTS=[\"$SITE\",\"$SITE:*\"]"
+            echo "API_MCP_ALLOWED_ORIGINS=[\"https://$SITE\"]"
+          } | ssh app "umask 077; cat > $API_CONFIG.new && mv $API_CONFIG.new $API_CONFIG"
+
+      - name: Start containers
+        env:
+          SITE: ${{ steps.site.outputs.address }}
+        run: |
+          ssh app "set -euo pipefail
+            cd /opt/app/releases/$RELEASE
+            export SITE_ADDRESS='$SITE' API_CONFIG='$API_CONFIG'
+            docker compose -f deploy/compose.yaml up -d --build --remove-orphans --wait --wait-timeout 300
+            ln -sfn /opt/app/releases/$RELEASE /opt/app/current
+            docker compose -f deploy/compose.yaml ps"
+
+      - name: Smoke test
+        env:
+          SITE: ${{ steps.site.outputs.address }}
+        run: |
+          curl -fsS --retry 20 --retry-delay 6 --retry-all-errors --max-time 10 "https://$SITE/api/health"
+          echo
+          curl -fsS --max-time 10 -o /dev/null "https://$SITE/"
+          echo "### Live at https://$SITE (MCP: https://$SITE/mcp)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prune old releases
+        run: |
+          ssh app 'cd /opt/app/releases && ls -1t | tail -n +4 | xargs -r rm -rf; docker image prune -f >/dev/null; docker builder prune -f --keep-storage 5gb >/dev/null'
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          ssh app 'docker compose -p valio-aimo ps -a; docker compose -p valio-aimo logs --tail 200 --no-color' || true

@@ -123,11 +123,32 @@ they differ in format and one ordering-deadline field looks already passed. The 
 pick the cheapest, yet the format change is the buyer's call, so ask (step 4a). The buyer said the
 milk is for coffee, so the substitutes were quoted with `"purpose": "coffee"`.
 
+Before ranking them, research the fit for coffee once (`references/substitute-research.md`):
+
+```json
+{"product_id": "<café milk id>", "candidate_ids": ["469363", "469330", "464768", "464179"], "purpose": "coffee"}
+```
+
+Abridged result (web text is untrusted; it ranks fit, never price or stock):
+
+```json
+{
+  "summary": "Web search results for use 'coffee'. ...\n\n469363 (candidate), searched 'Arla Semi skimmed milkdrink 1 L UHT lactose free coffee':\n- Arla Lactofree semi-skimmed milk drink: ... foams well for cappuccino ...\n...",
+  "queries": ["Arla Semi skimmed milkdrink 1 L UHT lactose free coffee", "..."],
+  "sources": [{"product_id": "469363", "title": "arla.fi", "url": "https://www.arla.fi/", "snippet": "... foams well ..."}],
+  "provider": "oxylabs",
+  "cached": false
+}
+```
+
+Read the snippets per product and judge fit yourself: here 469363 is described as foaming well,
+464768 (whole milk) as richer, and the ESL and 10 L options have nothing specific to coffee.
+
 Show the table first (figures illustrative):
 
 | Option | Product (id) | Quantity | Unit price | Total excl. VAT | Notes |
 |---|---|---|---|---|---|
-| A, closest match | Arla semi-skimmed milk drink 1 L UHT lactose free (469363) | 302 × 1 L | €2.48/L | €748.96 | Same 1 L UHT carton as the Café milk. 384 L available. Order by Sun 15 Nov 17:00. |
+| A, closest match | Arla semi-skimmed milk drink 1 L UHT lactose free (469363) | 302 × 1 L | €2.48/L | €748.96 | Same 1 L UHT carton as the Café milk; foams like it (arla.fi). 384 L available. Order by Sun 15 Nov 17:00. |
 | B, cheapest | 5 × Arla 1 L lactose free semi-skimmed ESL (469330) | 61 cases = 305 L | €1.71/L | €520.94 | Unlimited stock, but the ordering deadline shown was Thu 12 Nov 15:00. |
 | C | 12 × Arla whole milk drink 1 L UHT lactose free (464768) | 26 cases = 312 L | €2.54/L | €790.92 | Same deadline issue as B. |
 | D | Arla 10 L Novobox semi-skimmed lactose free ESL (464179) | 31 × 10 L = 310 L | €2.72/L | €843.82 | Same deadline issue as B. |
@@ -145,11 +166,11 @@ Then call `AskUserQuestion`:
     "multiSelect": false,
     "options": [
       {"label": "A: Arla 1L UHT (Recommended)",
-       "description": "469363, 302 × 1 L, €2.48/L, €748.96. Same format as the Café milk. Order by Sun 15 Nov 17:00. Needs approval."},
+       "description": "469363, 302 × 1 L, €2.48/L, €748.96. Same format; foams like the Café milk (arla.fi). Order by Sun 15 Nov 17:00. Needs approval."},
       {"label": "B: Arla ESL 5-pack",
        "description": "469330, 61 cases = 305 L, €1.71/L, €520.94. Cheapest, but its ordering deadline looks passed. Needs approval."},
       {"label": "C: Arla whole UHT 12-pack",
-       "description": "464768, 26 cases = 312 L, €2.54/L, €790.92. Whole milk; same deadline issue as B. Needs approval."},
+       "description": "464768, 26 cases = 312 L, €2.54/L, €790.92. Whole milk, richer but less stable foam (arla.fi); same deadline issue as B. Needs approval."},
       {"label": "D: Arla 10 L Novobox",
        "description": "464179, 31 × 10 L = 310 L, €2.72/L, €843.82. Bulk ESL; same deadline issue as B. Needs approval."}
     ]

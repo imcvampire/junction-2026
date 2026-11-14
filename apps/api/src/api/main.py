@@ -19,6 +19,8 @@ from api.orders.service import OrderError, OrderService
 from api.orders.store import Store
 from api.procurement.errors import describe_valio_error
 from api.procurement.service import ProcurementService
+from api.research.oxylabs import OxylabsSearch
+from api.research.service import ResearchService, WebSearch
 from api.routes import agent, health, orders, products
 from api.services import Services
 from api.valio.client import ValioClient, ValioError
@@ -31,6 +33,7 @@ def create_app(
     *,
     catalog: Catalog | None = None,
     valio_transport: httpx.AsyncBaseTransport | None = None,
+    web_search: WebSearch | None = None,
 ) -> FastAPI:
     cfg = cfg or get_settings()
     logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -50,6 +53,18 @@ def create_app(
         if http is None or not api_key:
             log.warning("valio_not_configured: set API_VALIO_BASE_URL and API_VALIO_API_KEY")
         valio = ValioClient(http, api_key=api_key, cache_ttl_s=cfg.quote_cache_ttl_s)
+        oxylabs = (
+            OxylabsSearch(
+                cfg.oxylabs_api_key.get_secret_value(),
+                base_url=cfg.oxylabs_base_url,
+                location=cfg.oxylabs_location,
+                max_results=cfg.research_results_per_product,
+            )
+            if web_search is None and cfg.oxylabs_api_key
+            else None
+        )
+        if web_search is None and oxylabs is None:
+            log.warning("research_not_configured: set API_OXYLABS_API_KEY to enable web research")
         store = Store(cfg.db_path)
         orders = OrderService(store)
         app.state.services = Services(
@@ -67,6 +82,13 @@ def create_app(
                 quote_ttl_s=cfg.quote_ttl_s,
                 quotes_per_minute=cfg.agent_quotes_per_minute,
             ),
+            research=ResearchService(
+                cat,
+                web_search or oxylabs,
+                timeout_s=cfg.research_timeout_s,
+                cache_ttl_s=cfg.research_cache_ttl_s,
+                per_minute=cfg.research_per_minute,
+            ),
             agent=shared_agent(
                 cfg.valio_customer,
                 Mandate(required_tags=cfg.required_tags, banned_allergens=cfg.banned_allergens),
@@ -78,6 +100,8 @@ def create_app(
         finally:
             if http:
                 await http.aclose()
+            if oxylabs:
+                await oxylabs.aclose()
             store.close()
 
     is_prod = cfg.environment == "production"

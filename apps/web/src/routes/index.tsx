@@ -1,7 +1,7 @@
-import { createFileRoute, redirect } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
+
+import { HomePage } from "@/features/home/components/home-page"
 
 export const Route = createFileRoute("/")({
-  beforeLoad: () => {
-    throw redirect({ to: "/journal-viewer" })
-  },
+  component: HomePage,
 })

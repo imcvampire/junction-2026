@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-labelledby="t">
+  <title id="t">An order over the spend limit waits for a human to approve or reject it</title>
+  <defs>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0b3d91" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="320" height="220" rx="22" fill="#eef3ff"/>
+  <circle cx="276" cy="40" r="56" fill="#dbe8ff"/>
+  <g filter="url(#s)">
+    <rect x="40" y="34" width="200" height="152" rx="14" fill="#fff"/>
+  </g>
+  <text x="58" y="62" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" fill="#1b2a4a">Approve order?</text>
+  <rect x="58" y="74" width="164" height="8" rx="4" fill="#dbe6fb"/>
+  <rect x="58" y="90" width="120" height="8" rx="4" fill="#dbe6fb"/>
+  <rect x="58" y="108" width="80" height="22" rx="11" fill="#fff4dc"/>
+  <text x="98" y="123" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" font-weight="600" fill="#9a6a00" text-anchor="middle">over limit</text>
+  <rect x="58" y="146" width="76" height="26" rx="8" fill="#0b3d91"/>
+  <text x="96" y="163" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="600" fill="#fff" text-anchor="middle">Approve</text>
+  <rect x="144" y="146" width="76" height="26" rx="8" fill="#fff" stroke="#b9cdf3" stroke-width="1.5"/>
+  <text x="182" y="163" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="600" fill="#1b2a4a" text-anchor="middle">Reject</text>
+  <g transform="translate(222 120)" filter="url(#s)">
+    <path d="M30 0 L58 10 V34 C58 52 44 64 30 70 C16 64 2 52 2 34 V10Z" fill="#1d5bd8"/>
+    <path d="M18 35 l8 8 l16 -17" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -1,6 +1,10 @@
 # Purchase Overview
 
 The existing `/journal-viewer` route displays a browser-local purchasing dashboard.
+The redesign is scoped to this route. The shared application shell, landing page,
+Orders navigation, global styles and theme controls retain their master behavior.
+Dashboard colors and interaction styles live in `journal-viewer.css` under the
+`.journal-viewer-theme` wrapper. Recipe and web research remain visible when recorded.
 Records are parsed against the purchasing journal schema; no journal data is uploaded
 and the dashboard does not place, approve or submit orders.
 

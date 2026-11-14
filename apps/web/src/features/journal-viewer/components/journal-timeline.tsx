@@ -3,6 +3,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   FileTextIcon,
+  GlobeIcon,
   MessageCircleQuestionIcon,
   MessageSquareReplyIcon,
   ReceiptTextIcon,
@@ -27,6 +28,7 @@ const ICONS: Record<TimelineEntry["type"], LucideIcon> = {
   approval: CircleCheckIcon,
   cancel: BanIcon,
   error: CircleAlertIcon,
+  research: GlobeIcon,
   report: FileTextIcon,
 }
 

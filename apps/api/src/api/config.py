@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     quote_ttl_s: float = 900.0
     agent_quotes_per_minute: int = 30
 
+    # Substitute web research (Oxylabs Web API search). Without a key the tool answers research_not_configured.
+    oxylabs_api_key: SecretStr | None = None
+    oxylabs_base_url: str = "https://webapi.oxylabs.io"
+    # ISO 3166-1 alpha-2 search locale; None uses the provider's default.
+    oxylabs_location: str | None = "FI"
+    research_results_per_product: int = 3
+    research_timeout_s: float = 30.0
+    research_cache_ttl_s: float = 3600.0
+    research_per_minute: int = 6
+
     # DNS-rebinding protection for /mcp. Add the public host (e.g. "api.example.com") when deployed.
     mcp_allowed_hosts: list[str] = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
     mcp_allowed_origins: list[str] = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
