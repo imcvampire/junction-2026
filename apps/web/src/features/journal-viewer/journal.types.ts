@@ -339,6 +339,94 @@ export interface ValioAimoJournal {
     used_for?: string | null
   }[]
   /**
+   * Every research_recipe call, failed ones included. Web text is untrusted context for the ingredient list only.
+   */
+  recipes?: {
+    /**
+     * research_id from the result; null when the call failed.
+     */
+    research_id: string | null
+    /**
+     * The dish name, as sent.
+     */
+    dish: string
+    /**
+     * The language sent.
+     */
+    language?: "en" | "fi" | "sv" | null
+    /**
+     * ok, or the refusal: research_not_configured, research_unavailable, rate_limited.
+     */
+    outcome: "ok" | "not_configured" | "unavailable" | "rate_limited"
+    /**
+     * The web search the server ran.
+     */
+    query?: string | null
+    /**
+     * The result's summary, verbatim.
+     */
+    summary?: string | null
+    /**
+     * The result's sources.
+     */
+    sources?: {
+      /**
+       * Source title, often the site name.
+       */
+      title?: string | null
+      /**
+       * Source URL.
+       */
+      url: string
+      /**
+       * The result's text, untrusted.
+       */
+      snippet?: string | null
+    }[]
+    /**
+     * Whether the server answered from its cache.
+     */
+    cached?: boolean | null
+    /**
+     * searched_at from the result.
+     */
+    searched_at?: string | null
+    /**
+     * The servings the amounts were scaled to.
+     */
+    servings?: number | null
+    /**
+     * The ingredient list the buyer confirmed; empty when none was confirmed.
+     */
+    ingredients: {
+      /**
+       * The ingredient, as confirmed.
+       */
+      name: string
+      /**
+       * The scaled amount in a catalog unit.
+       */
+      amount?: {
+        /**
+         * Amount value.
+         */
+        value: number
+        /**
+         * Unit: L, dl, cl, ml, kg, g or pcs.
+         */
+        unit: string
+      } | null
+      /**
+       * The site the ingredient and amount came from; null when the buyer added it.
+       */
+      source?: string | null
+    }[]
+    /**
+     * One sentence: how the research shaped the shopping list.
+     */
+    used_for?: string | null
+  }[]
+  /**
    * Every refused call and what the agent changed.
    */
   errors: {

@@ -64,7 +64,7 @@ def create_app(
             else None
         )
         if web_search is None and oxylabs is None:
-            log.warning("research_not_configured: set API_OXYLABS_API_KEY to enable research_substitutes")
+            log.warning("research_not_configured: set API_OXYLABS_API_KEY to enable web research")
         store = Store(cfg.db_path)
         orders = OrderService(store)
         app.state.services = Services(

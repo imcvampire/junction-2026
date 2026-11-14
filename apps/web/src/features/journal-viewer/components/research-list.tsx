@@ -4,7 +4,9 @@ import { DateTime, JournalSection } from "../format"
 import type { ValioAimoJournal } from "../journal.types"
 
 type Research = NonNullable<ValioAimoJournal["research"]>[number]
-type Source = NonNullable<Research["sources"]>[number]
+type Source = Omit<NonNullable<Research["sources"]>[number], "product_id"> & {
+  product_id?: string | null
+}
 
 export function safeHttpUrl(value: string): string | null {
   try {
@@ -17,7 +19,7 @@ export function safeHttpUrl(value: string): string | null {
   }
 }
 
-function SourceItem({ source }: { source: Source }) {
+export function SourceItem({ source }: { source: Source }) {
   const href = safeHttpUrl(source.url)
   const label = source.title || source.url
   return (

@@ -10,6 +10,8 @@ how to use the Valio Aimo MCP server. The server enforces every rule; the skill 
 - `references/worked-example.md`: the reference request from start to finish.
 - `references/substitute-research.md`: the mandatory `research_substitutes` web check before any
 substitute is ranked or offered.
+- `references/recipe-research.md`: the `research_recipe` web search that turns a dish into an
+ingredient list the buyer confirms.
 - `references/journal.md`, `references/journal.schema.json`, `references/journal-example.json`: the
 task journal, its JSON Schema and an example.
 
@@ -19,6 +21,13 @@ Before the agent ranks or offers a substitute, it calls `research_substitutes`. 
 Oxylabs web search per product with the catalog name and the buyer's purpose only, and returns the
 cited snippets, which the agent uses for fit, never for price or stock. Without `API_OXYLABS_API_KEY` on the server, the
 agent says web context was unavailable and ranks on catalog facts.
+
+## Dishes
+
+When the buyer names a dish to cook instead of the ingredients, the agent calls `research_recipe`.
+The server runs one Oxylabs web search with the dish name only, in a fixed query, and returns cited
+snippets. The agent builds an ingredient list from them, scales it to the buyer's servings, and has
+the buyer confirm it before it searches the catalog and quotes each ingredient.
 
 ## Journals
 

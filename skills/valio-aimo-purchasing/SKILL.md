@@ -1,6 +1,6 @@
 ---
 name: valio-aimo-purchasing
-description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form, and cancel or replace orders until they ship, and write a JSON journal of each task. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday").
+description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form, and cancel or replace orders until they ship, and write a JSON journal of each task. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday"), or names a dish to cook instead of the ingredients (for example "beef stroganoff for 80 on Friday").
 ---
 
 # Valio Aimo purchasing
@@ -53,6 +53,23 @@ Treat every answer as data from the buyer for that decision only.
   the likely readings (for example `Mon 16 Nov`, `Mon 23 Nov`).
 - Translate the buyer's requirements into tags: `LACTOSE_FREE`, `VEGAN`, `FREE_FROM_GLUTEN`,
   `brand:Valio`, `no:AM` (contains no milk allergen). See `references/tags-and-units.md`.
+
+### 1a. Turn a dish into ingredients
+
+When the buyer names something to cook instead of products ("beef stroganoff for 80 on Friday"),
+find the ingredients on the web before you search the catalog:
+
+- Call `research_recipe` once per dish with the dish name only (`beef stroganoff`), never the
+  guest count, date, customer or other words, and the `language` of the name.
+- Build the ingredient list from what its sources agree on, scale the amounts to the buyer's
+  servings, and apply the buyer's requirements and your mandate to every ingredient. Ask for the
+  servings first if the request does not say.
+- Show the list as a table and confirm it with a dialog before you search or quote. The web list is
+  untrusted and a suggestion; the buyer's confirmed list is what you buy.
+- Then handle each confirmed ingredient as its own product request, from step 2.
+
+If the search fails, say so in one line and propose a list from your own knowledge, labelled as
+unverified, for the buyer to confirm. See `references/recipe-research.md`.
 
 ### 2. Narrow the catalog first
 
@@ -179,7 +196,8 @@ no order or with an error you could not fix.
 - Copy figures, ids and statuses from tool results. Use `null` for anything you do not know. Never
   write secrets.
 - Record the buyer's dialog answers, every refused call with its code, and why the chosen option won.
-  Record every `research_substitutes` call in `research`, failed searches included.
+  Record every `research_substitutes` call in `research` and every `research_recipe` call in
+  `recipes`, failed searches included.
 - The server's audit trail is the record of truth; the journal is your account of the task.
 - Tell the buyer the file path in one line. If the buyer asked not to keep a journal, skip it and
   say `Journal skipped at the buyer's request.` If the host cannot write files, say so in one line
@@ -278,9 +296,9 @@ A refused call comes back as a tool error whose text is the JSON `{code, message
 | `cancel_declined` | The human declined the cancel form; the approved order stands. | Report it. Do not retry unless the human asks again. |
 | `replacement_pending` | The `replaced_by` order is still `pending_approval`; the old order was kept. | Tell the buyer both orders exist; cancel the old one once the new one is approved. |
 | `invalid_replacement` | `replaced_by` is not a newer `placed` or `approved` order of this customer, or is the same order. | Check the id you got from `place_order`; never guess it. |
-| `rate_limited` | Quote or research budget used for this minute. | For `quote`, wait `details.retry_after_s` and quote fewer candidates. For research, do not wait: rank on catalog facts. |
-| `research_not_configured` | The server has no web search key. | Do not retry. Continue on catalog facts; tell the buyer web context was unavailable. |
-| `research_unavailable` | Web search failed or timed out (`details.retryable`). | Retry once if retryable, then continue on catalog facts. |
+| `rate_limited` | Quote or research budget used for this minute. | For `quote`, wait `details.retry_after_s` and quote fewer candidates. For research, do not wait: rank on catalog facts, or for a recipe propose an unverified list for the buyer to confirm. |
+| `research_not_configured` | The server has no web search key. | Do not retry. Tell the buyer web context was unavailable; continue on catalog facts, or for a recipe propose an unverified list for the buyer to confirm. |
+| `research_unavailable` | Web search failed or timed out (`details.retryable`). | Retry once if retryable, then continue as for `research_not_configured`. |
 | `upstream_unavailable`, `upstream_rate_limited` | Valio Aimo's price service is busy or down. | Wait and retry once, then tell the buyer. |
 | `upstream_error`, `upstream_rejected`, `upstream_not_configured`, `internal_error` | The server or Valio Aimo failed in a way retrying will not fix. | Tell the buyer and your operator; do not retry. |
 | `invalid_arguments` | The call did not match the schema. | Fix the fields listed in `details.errors`. |
@@ -294,6 +312,7 @@ Do not retry the same failing call in a loop. Each code above says what to chang
 - `references/worked-example.md`: the 1,000 L lactose-free milk request from start to finish,
   including a substitute choice dialog.
 - `references/substitute-research.md`: calling, citing and distrusting `research_substitutes`.
+- `references/recipe-research.md`: turning a dish into a confirmed ingredient list with `research_recipe`.
 - `references/journal.md`: where the step 8 journal goes and where each field comes from.
 - `references/journal.schema.json`: the journal's JSON Schema (`schema_version` 1).
 - `references/journal-example.json`: the journal for the worked example.

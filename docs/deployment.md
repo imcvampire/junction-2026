@@ -57,7 +57,7 @@ Repository secrets (`gh secret set NAME`, which reads the value from stdin):
 | `DEPLOY_SSH_PRIVATE_KEY` | yes | Private half of a dedicated ed25519 key. CI derives the public key. |
 | `TF_STATE_PASSPHRASE` | yes | Random string. Keep a copy, because without it the state cannot be read. |
 | `API_VALIO_API_KEY` | for quotes and orders | Challenge API key. |
-| `API_OXYLABS_API_KEY` | optional | Enables substitute web research. |
+| `API_OXYLABS_API_KEY` | optional | Enables web research: `research_substitutes` and `research_recipe`. |
 | `API_VALIO_BASE_URL`, `API_GEMINI_API_KEY`, `OPENAI_COMPATIBLE_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL` | optional | Mirrored from the local `.env` and written to the API config. |
 
 The deploy key and state passphrase are kept in the gitignored `.deploy/` folder at the repo

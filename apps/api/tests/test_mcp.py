@@ -145,8 +145,9 @@ def test_tools_are_listed_with_schemas_and_annotations(
         place = tools["place_order"].annotations
         assert place and place.idempotentHint and not place.destructiveHint
         assert {"quote_id", "lines", "reason", "client_reference"} <= set(tools["place_order"].inputSchema["required"])
-        web = tools["research_substitutes"].annotations
-        assert web and web.readOnlyHint and web.openWorldHint and not web.destructiveHint
+        for name in ("research_substitutes", "research_recipe"):
+            web = tools[name].annotations
+            assert web and web.readOnlyHint and web.openWorldHint and not web.destructiveHint
 
     run_mcp(settings, catalog, fake_valio, body)
 
@@ -296,6 +297,7 @@ def test_skill_mentions_only_real_tools() -> None:
         "reject_order",
         "cancel_order",
         "research_substitutes",
+        "research_recipe",
         "get_order_status",
         "create_order_draft",
         "agree_order",
@@ -603,3 +605,18 @@ def test_research_refusals_are_tool_errors_with_codes(
         assert error_body(bad)["code"] == "invalid_arguments"
 
     run_mcp(settings, catalog, fake_valio, body)
+
+
+def test_research_recipe_returns_cited_web_context(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+    fake = FakeSearch()
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        result = await session.call_tool("research_recipe", {"dish": "lohikeitto", "language": "fi"})
+        view = structured(result)
+        assert view["query"] == "lohikeitto resepti ainekset" and view["sources"][0]["url"] == "https://arla.fi/foam"
+        assert cast(TextContent, result.content[0]).text.startswith("1 recipe sources for 'lohikeitto'.")
+        bad = await session.call_tool("research_recipe", {"dish": "soup for 200"})
+        assert error_body(bad)["code"] == "invalid_arguments"
+        assert fake.queries == ["lohikeitto resepti ainekset"]
+
+    run_mcp(settings, catalog, fake_valio, body, web_search=fake)

@@ -8,6 +8,7 @@ import { JournalTimeline } from "./journal-timeline"
 import { OrdersList } from "./orders-list"
 import { QuestionsList } from "./questions-list"
 import { QuoteTables } from "./quote-table"
+import { RecipeList } from "./recipe-list"
 import { RequestAuthority } from "./request-authority"
 import { ResearchList } from "./research-list"
 
@@ -22,6 +23,7 @@ export function JournalView({ journal }: { journal: ValioAimoJournal }) {
       <Separator />
       <JournalTimeline timeline={journal.timeline} />
       <RequestAuthority journal={journal} />
+      <RecipeList recipes={journal.recipes} />
       <ResearchList research={journal.research} />
       <QuoteTables journal={journal} />
       <QuestionsList questions={journal.questions} />

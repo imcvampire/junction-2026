@@ -130,3 +130,25 @@ def test_journal_doc_research_example_validates(schema: dict[str, Any], example:
     doc = (REFERENCES / "journal.md").read_text(encoding="utf-8")
     snippet = doc.split("A research entry for the substitute choice", 1)[1].split("```json", 1)[1].split("```", 1)[0]
     assert _errors(schema, {**example, "research": [json.loads(snippet)]}) == []
+
+
+def test_recipe_research_entries_validate(schema: dict[str, Any], example: dict[str, Any]) -> None:
+    entry = {
+        "research_id": "7d4c2a10-1f3b-4c5e-8a9d-0b1c2d3e4f50",
+        "dish": "lohikeitto",
+        "language": "fi",
+        "outcome": "ok",
+        "query": "lohikeitto resepti ainekset",
+        "sources": [{"title": "kotikokki.net", "url": "https://www.kotikokki.net/"}],
+        "cached": False,
+        "searched_at": "2026-11-14T15:55:00+02:00",
+        "servings": 40,
+        "ingredients": [
+            {"name": "Cooking cream", "amount": {"value": 4, "unit": "L"}, "source": "kotikokki.net"},
+            {"name": "Dill", "amount": None, "source": None},
+        ],
+    }
+    assert _errors(schema, {**example, "recipes": [entry]}) == []
+    failed: dict[str, Any] = {"research_id": None, "dish": "lohikeitto", "outcome": "unavailable", "ingredients": []}
+    assert _errors(schema, {**example, "recipes": [failed]}) == []
+    assert _errors(schema, {**example, "recipes": [{**entry, "ingredients": [{"name": "Dill", "brand": "x"}]}]})

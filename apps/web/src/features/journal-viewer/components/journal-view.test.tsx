@@ -186,6 +186,51 @@ describe("JournalView", () => {
     expect(view.getByText("Foams well for cappuccino.")).toBeInTheDocument()
   })
 
+  test("shows recipe research with the confirmed ingredients", () => {
+    renderJournal(
+      loadExample((journal) => {
+        journal.recipes = [
+          {
+            research_id: "rc1",
+            dish: "lohikeitto",
+            language: "fi",
+            outcome: "ok",
+            query: "lohikeitto resepti ainekset",
+            servings: 40,
+            sources: [
+              { title: "kotikokki.net", url: "https://www.kotikokki.net/" },
+              { title: "evil", url: "javascript:alert(1)" },
+            ],
+            ingredients: [
+              {
+                name: "Cooking cream",
+                amount: { value: 4, unit: "L" },
+                source: "kotikokki.net",
+              },
+              { name: "Dill", amount: null, source: null },
+            ],
+          },
+        ]
+      })
+    )
+
+    const section = screen
+      .getByRole("heading", { name: "Recipe research" })
+      .closest("section")
+    if (!section) throw new Error("recipe section missing")
+    const view = within(section)
+    expect(view.getByText("lohikeitto")).toBeInTheDocument()
+    expect(
+      view.getByText("Cooking cream: 4 L", { exact: false })
+    ).toBeInTheDocument()
+    expect(view.getByText("Dill")).toBeInTheDocument()
+    expect(view.getByRole("link", { name: "kotikokki.net" })).toHaveAttribute(
+      "href",
+      "https://www.kotikokki.net/"
+    )
+    expect(view.queryByRole("link", { name: "evil" })).not.toBeInTheDocument()
+  })
+
   test("renders missing values as unknown", () => {
     renderJournal(loadExample())
 
