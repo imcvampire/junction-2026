@@ -34,7 +34,7 @@ class Human:
         self.asked: list[ElicitRequestFormParams] = []
         self.replies: list[ElicitResult] = []
 
-    def will(self, action: str = "accept", **content: str) -> None:
+    def will(self, action: str = "accept", **content: str | bool) -> None:
         self.replies.append(ElicitResult(action=action, content=content or None))  # type: ignore[arg-type]
 
     async def __call__(
@@ -281,6 +281,7 @@ def test_skill_mentions_only_real_tools() -> None:
         "list_pending_approvals",
         "approve_order",
         "reject_order",
+        "cancel_order",
         "get_order_status",
         "create_order_draft",
         "agree_order",
@@ -433,3 +434,126 @@ def test_quote_carries_the_buyers_purpose(settings: Settings, catalog: Catalog, 
         assert order["purpose"] == "baking"
 
     run_mcp(settings, catalog, fake_valio, body)
+
+
+async def console(app: FastAPI, order_id: str, action: str) -> httpx.Response:
+    """The order console, over the same live server the MCP session uses."""
+    async with httpx.AsyncClient(base_url=app.state.mcp_url.removesuffix("/mcp")) as http:
+        return await http.post(f"/api/orders/{order_id}/{action}", json={})
+
+
+async def placed(session: ClientSession, ref: str) -> dict[str, Any]:
+    order = structured(await place_best(session, await quote_milk(session, litres=10), ref))
+    assert order["status"] == "placed"
+    return order
+
+
+async def approved(session: ClientSession, ref: str = "ref-1") -> dict[str, Any]:
+    order = structured(await place_best(session, await quote_milk(session), ref))
+    res = await session.call_tool("approve_order", {"order_id": order["order_id"]})
+    assert structured(res)["status"] == "approved"
+    return order
+
+
+def test_a_placed_or_shipped_order_is_answered_without_a_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(session: ClientSession, app: FastAPI) -> None:
+        order = await placed(session, "a")
+        res = structured(await session.call_tool("cancel_order", {"order_id": order["order_id"], "reason": "no event"}))
+        assert res["status"] == "cancelled" and res["cancellation"]["confirmed_via"] == "agent"
+        listed = structured(await session.call_tool("list_orders", {"status": "cancelled"}))
+        assert [o["order_id"] for o in listed["orders"]] == [order["order_id"]]
+
+        other = await placed(session, "b")
+        assert (await console(app, other["order_id"], "ship")).status_code == 200
+        err = error_body(await session.call_tool("cancel_order", {"order_id": other["order_id"], "reason": "x"}))
+        assert err["code"] == "already_shipped"
+        listed = structured(await session.call_tool("list_orders", {"status": "shipped"}))
+        assert [o["order_id"] for o in listed["orders"]] == [other["order_id"]]
+
+    run_mcp(settings, catalog, fake_valio, body)
+
+
+def test_an_approved_order_is_cancelled_by_the_human_in_the_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will(decision="approve", reason="gala")
+    human.will("decline")
+    human.will(confirm=False, reason="keep it")
+    human.will(confirm=True, reason="Gala moved to spring")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await approved(session)
+        args = {"order_id": order["order_id"], "reason": "buyer says the gala is off"}
+        for action in ("decline", "accept"):
+            err = error_body(await session.call_tool("cancel_order", args))
+            assert err["code"] == "cancel_declined" and err["details"] == {"action": action}
+        seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
+        assert seen["status"] == "approved"
+
+        res = structured(await session.call_tool("cancel_order", args))
+        assert res["status"] == "cancelled"
+        assert res["cancellation"]["reason"] == "Gala moved to spring"
+        assert res["cancellation"]["confirmed_via"] == "mcp_elicitation"
+        form = human.asked[1]
+        assert "Cancel approved order" in form.message and "undoes the approval" in form.message
+        assert form.requestedSchema["properties"]["reason"]["default"] == "buyer says the gala is off"
+        audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
+        assert audit["entries"][-1]["actor"] == "approver"
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_a_client_without_elicitation_cannot_cancel_an_approved_order(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(session: ClientSession, app: FastAPI) -> None:
+        order = structured(await place_best(session, await quote_milk(session)))
+        assert (await console(app, order["order_id"], "approve")).status_code == 200
+        err = error_body(await session.call_tool("cancel_order", {"order_id": order["order_id"], "reason": "x"}))
+        assert err["code"] == "elicitation_required"
+        seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
+        assert seen["status"] == "approved"
+
+    run_mcp(settings, catalog, fake_valio, body)
+
+
+def test_replacing_an_approved_order_skips_the_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will(decision="approve", reason="gala")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        old = await approved(session, "old")
+        pending = structured(await place_best(session, await quote_milk(session), "pending"))
+        args = {"order_id": old["order_id"], "reason": "buyer wants 10 L instead"}
+        err = error_body(await session.call_tool("cancel_order", {**args, "replaced_by": pending["order_id"]}))
+        assert err["code"] == "replacement_pending"
+        seen = structured(await session.call_tool("get_order", {"order_id": old["order_id"]}))
+        assert seen["status"] == "approved"
+
+        new = await placed(session, "new")
+        res = structured(await session.call_tool("cancel_order", {**args, "replaced_by": new["order_id"]}))
+        assert res["status"] == "cancelled" and res["cancellation"]["confirmed_via"] == "replacement"
+        assert res["cancellation"]["replaced_by"] == new["order_id"]
+        assert len(human.asked) == 1
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_a_blank_replacement_still_asks_the_human(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+    human = Human()
+    human.will(decision="approve", reason="gala")
+    human.will(confirm=True, reason="   ")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await approved(session)
+        args = {"order_id": order["order_id"], "reason": "gala is off", "replaced_by": "  "}
+        res = structured(await session.call_tool("cancel_order", args))
+        assert len(human.asked) == 2 and res["cancellation"]["confirmed_via"] == "mcp_elicitation"
+        assert res["cancellation"]["reason"] == "gala is off" and res["cancellation"]["replaced_by"] is None
+
+    run_mcp(settings, catalog, fake_valio, body, human)

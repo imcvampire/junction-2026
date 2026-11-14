@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -220,3 +221,43 @@ def test_purpose_reaches_the_quote_and_order(client: TestClient) -> None:
         },
     )
     assert long.status_code == 422
+
+
+def test_agent_cancels_a_placed_order_until_it_ships(client: TestClient) -> None:
+    first = _order(client, _quote(client), "c1").json()
+    url = f"/api/agent/v1/orders/{first['order_id']}/cancel"
+    blank = client.post(url, json={"reason": " "})
+    assert blank.status_code == 422 and blank.json()["code"] == "reason_required"
+    res = client.post(url, headers={"Idempotency-Key": "k1"}, json={"reason": "menu changed"})
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "cancelled" and res.json()["cancellation"]["confirmed_via"] == "rest"
+    again = client.post(url, headers={"Idempotency-Key": "k1"}, json={"reason": "menu changed"})
+    assert again.json() == res.json()
+    listed = client.get("/api/agent/v1/orders", params={"status": "cancelled"}).json()
+    assert [o["order_id"] for o in listed["orders"]] == [first["order_id"]]
+
+    second = _order(client, _quote(client), "c2").json()
+    shipped = client.post(f"/api/orders/{second['order_id']}/ship")
+    assert shipped.status_code == 200 and shipped.json()["status"] == "shipped"
+    late = client.post(f"/api/agent/v1/orders/{second['order_id']}/cancel", json={"reason": "too late"})
+    assert late.status_code == 409 and late.json()["code"] == "already_shipped"
+    shipped_at = datetime.fromisoformat(late.json()["details"]["shipped_at"])
+    assert shipped_at == datetime.fromisoformat(shipped.json()["shipped_at"])
+
+
+def test_console_ships_committed_orders_and_cancels_approved_ones(client: TestClient) -> None:
+    pending = _escalated(client, "p1")
+    url = f"/api/orders/{pending['order_id']}"
+    early = client.post(f"{url}/ship")
+    assert early.status_code == 409 and early.json()["code"] == "invalid_state"
+    assert client.post(f"{url}/approve", json={"reason": "ok"}).status_code == 200
+
+    res = client.post(f"{url}/cancel", json={"reason": "event moved"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "cancelled" and body["decision"]["approved"] is True
+    assert body["cancellation"]["confirmed_via"] == "rest"
+    assert [e["action"] for e in client.get(f"{url}/audit").json()] == ["escalated", "approved", "cancelled"]
+    assert "Cancelled by" in client.get(f"{url}/audit.txt").text
+    assert client.post(f"{url}/ship").json()["code"] == "invalid_state"
+    assert client.post("/api/orders/ord_nope/ship").status_code == 404

@@ -17,10 +17,13 @@ class OrderStatus(StrEnum):
     PENDING_APPROVAL = "pending_approval"
     APPROVED = "approved"
     REJECTED = "rejected"
+    SHIPPED = "shipped"
+    CANCELLED = "cancelled"
 
 
 Actor = Literal["agent", "buyer", "approver", "system"]
 ConfirmedVia = Literal["rest", "mcp_elicitation"]
+CancelVia = Literal["agent", "rest", "mcp_elicitation", "replacement"]
 
 
 class OrderLine(BaseModel):
@@ -54,6 +57,17 @@ class OrderDecision(BaseModel):
     )
 
 
+class Cancellation(BaseModel):
+    reason: str
+    at: datetime
+    cancelled_by: DecidedBy
+    confirmed_via: CancelVia = Field(
+        description="agent: the agent alone; rest: a REST caller; mcp_elicitation: the human through the MCP form; "
+        "replacement: the agent, replacing it with the order the human asked for"
+    )
+    replaced_by: str | None = Field(default=None, description="The order placed in its place, if any")
+
+
 class Order(BaseModel):
     id: str
     session_id: str | None = None
@@ -73,6 +87,8 @@ class Order(BaseModel):
     updated_at: datetime
     approval_reasons: list[str] = Field(default_factory=list[str])
     decision: OrderDecision | None = None
+    cancellation: Cancellation | None = None
+    shipped_at: datetime | None = None
 
 
 class AuditEntry(BaseModel):
@@ -94,4 +110,11 @@ class Decision(BaseModel):
         gt=0,
         description="Approve only: the total the human saw. Required after a price_changed refusal; "
         "a mismatch with the current total is refused again",
+    )
+
+
+class CancelRequest(BaseModel):
+    reason: str = Field(max_length=1000, description="Why the order is cancelled; required")
+    replaced_by: str | None = Field(
+        default=None, max_length=64, description="The newer order that replaces this one, placed first"
     )

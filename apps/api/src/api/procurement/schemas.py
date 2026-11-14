@@ -6,7 +6,7 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from api.catalog.index import ALLERGEN_NAMES, Product
-from api.orders.models import AuditEntry, Order, OrderDecision, OrderLine, OrderStatus
+from api.orders.models import AuditEntry, Cancellation, Order, OrderDecision, OrderLine, OrderStatus
 
 MAX_QUOTE_ITEMS = 12
 MAX_SEARCH_RESULTS = 20
@@ -252,6 +252,10 @@ class OrderView(BaseModel):
         description="Why a human must approve (the spend limit); empty when placed autonomously"
     )
     decision: OrderDecision | None
+    cancellation: Cancellation | None = Field(
+        default=None, description="Who cancelled the order, why, how it was confirmed, and its replacement"
+    )
+    shipped_at: datetime | None = Field(default=None, description="When it shipped; it can no longer be cancelled")
     created_at: datetime
     updated_at: datetime
 
@@ -271,6 +275,8 @@ class OrderView(BaseModel):
             purpose=o.purpose,
             approval_reasons=o.approval_reasons,
             decision=o.decision,
+            cancellation=o.cancellation,
+            shipped_at=o.shipped_at,
             created_at=o.created_at,
             updated_at=o.updated_at,
         )

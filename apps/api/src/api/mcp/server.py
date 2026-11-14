@@ -7,7 +7,8 @@ Each tool returns structured content (validated against its output schema) plus 
 summary followed by the same JSON, for hosts that only pass text to the model.
 
 `approve_order` and `reject_order` ask the human themselves through MCP elicitation: the decision and
-reason recorded are what the host's form returned, not the model's arguments. That needs a server
+reason recorded are what the host's form returned, not the model's arguments. `cancel_order` does the same
+for an approved order, unless the cancel names the replacement order the human asked for. That needs a server
 request in the middle of a tool call, so the transport is stateful (session id) with SSE responses.
 """
 
@@ -27,7 +28,7 @@ from starlette.requests import Request
 
 from api.agents.models import AgentPrincipal
 from api.config import Settings
-from api.orders.models import OrderStatus
+from api.orders.models import CancelVia, OrderStatus
 from api.orders.service import OrderError
 from api.procurement.errors import describe_error
 from api.procurement.schemas import (
@@ -69,7 +70,9 @@ Right after your own place_order returns pending_approval, call approve_order wi
 question. For other pending orders, call only when the human asks to decide that order. Pass the human's own words as
 the suggested reason, or none. decision_cancelled means the human declined the form: report it, do not retry.
 elicitation_required means this host cannot show the form: send the human to the order console. stock_changed means
-the order was closed: re-quote with details.rerun."""
+the order was closed: re-quote with details.rerun. cancel_order cancels any order that has not shipped, only when the
+buyer asks; an approved order asks the human through a form unless replaced_by names the newer order the buyer asked
+for in its place (place that one first). already_shipped means it is too late: send the buyer to customer service."""
 
 TOOL_NAMES = (
     "whoami",
@@ -83,6 +86,7 @@ TOOL_NAMES = (
     "list_pending_approvals",
     "approve_order",
     "reject_order",
+    "cancel_order",
 )
 
 _READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -136,11 +140,55 @@ def _decision_form(approve: bool, suggestion: str | None) -> type[DecisionForm]:
     )
 
 
+class CancelForm(BaseModel):
+    confirm: bool = Field(default=True, description="Cancel the order")
+    reason: str = Field(min_length=1, max_length=1000, description="Why, in your words (kept in the audit trail)")
+
+
+def _cancel_form(suggestion: str) -> type[CancelForm]:
+    """The form with the agent's reason as the default."""
+    reason = CancelForm.model_fields["reason"]
+    return create_model(
+        "CancelForm",
+        __base__=CancelForm,
+        reason=(str, Field(default=suggestion, min_length=1, max_length=1000, description=reason.description)),
+    )
+
+
+def _cancel_message(order: OrderView, reason: str) -> str:
+    out = [
+        f"Cancel approved order {order.order_id} placed by agent {order.agent_id or 'unknown'}?",
+        f"Total {order.total:.2f} {order.currency}, delivery {order.delivery_date}.",
+    ]
+    out += [f"- {li.quantity:g} {li.sales_unit} {li.product_id} {li.name}" for li in order.lines]
+    if order.decision:
+        d = order.decision
+        by = d.decided_by.name if d.decided_by else "the system"
+        out.append(f"This undoes the approval by {by} ({d.reason or 'no reason given'}).")
+    out.append(f"The agent's reason: {reason}")
+    return "\n".join(out)
+
+
 def _supports_form_elicitation(ctx: ToolContext) -> bool:
     params = ctx.session.client_params
     el = params.capabilities.elicitation if params else None
     # An empty `elicitation: {}` predates modes and means form support.
     return el is not None and (el.form is not None or el.url is None)
+
+
+def _require_elicitation(ctx: ToolContext, tool: str, form: str, verb: str) -> None:
+    if _supports_form_elicitation(ctx):
+        return
+    log.info("mcp_tool_refused tool=%s code=elicitation_required", tool)
+    raise ToolFailure(
+        json.dumps(
+            {
+                "code": "elicitation_required",
+                "message": f"This MCP client cannot show {form}; {verb} in the order console or over REST",
+                "details": {},
+            }
+        )
+    )
 
 
 def _decision_message(order: OrderView, approve: bool, check: Recheck | None) -> str:
@@ -207,6 +255,8 @@ async def _run[M: BaseModel](
         services: Services = request.app.state.services
         out = call(services.procurement, services.agent)
         model = await out if isinstance(out, Awaitable) else out
+    except ToolFailure:
+        raise
     except Exception as e:
         described = describe_error(e)
         if described is None:
@@ -250,6 +300,12 @@ def _order_summary(o: OrderView) -> str:
         d = o.decision
         by = f" by {d.decided_by.name} ({d.decided_by.agent_id})" if d.decided_by else ""
         text += f" Decision: {'approved' if d.approved else 'rejected'}{by} ({d.reason or 'no reason'})."
+    if o.cancellation:
+        c = o.cancellation
+        replaced = f" (replaced by {c.replaced_by})" if c.replaced_by else ""
+        text += f" Cancelled{replaced} by {c.cancelled_by.name} via {c.confirmed_via}: {c.reason}."
+    if o.shipped_at:
+        text += f" Shipped {o.shipped_at.isoformat()}; it can no longer be cancelled."
     return text
 
 
@@ -419,7 +475,7 @@ def build_mcp_server(cfg: Settings) -> FastMCP[Any]:
     )
     async def list_orders(
         ctx: ToolContext,
-        status: Literal["placed", "pending_approval", "approved", "rejected"] | None = None,
+        status: Literal["placed", "pending_approval", "approved", "rejected", "shipped", "cancelled"] | None = None,
         limit: Annotated[int, Field(ge=1, le=100)] = 20,
         scope: OrderScope = "mine",
     ) -> Annotated[CallToolResult, OrderList]:
@@ -455,18 +511,7 @@ def build_mcp_server(cfg: Settings) -> FastMCP[Any]:
         )
 
     async def decide(ctx: ToolContext, tool: str, order_id: str, *, approve: bool, suggestion: str | None) -> Any:
-        if not _supports_form_elicitation(ctx):
-            log.info("mcp_tool_refused tool=%s code=elicitation_required", tool)
-            raise ToolFailure(
-                json.dumps(
-                    {
-                        "code": "elicitation_required",
-                        "message": "This MCP client cannot show an approval form; "
-                        "decide in the order console or over REST",
-                        "details": {},
-                    }
-                )
-            )
+        _require_elicitation(ctx, tool, "an approval form", "decide")
 
         async def call(svc: ProcurementService, agent: AgentPrincipal) -> OrderView:
             order = svc.get_order(agent, order_id)
@@ -508,5 +553,56 @@ def build_mcp_server(cfg: Settings) -> FastMCP[Any]:
         reason: Annotated[str | None, _SUGGESTED_REASON] = None,
     ) -> Annotated[CallToolResult, OrderView]:
         return await decide(ctx, "reject_order", order_id, approve=False, suggestion=reason)
+
+    @mcp.tool(
+        description="Cancel an order that has not shipped (placed, pending_approval or approved), only when the "
+        "buyer asks. Refused with already_shipped once it ships. Cancelling an approved order asks the human through "
+        "a form, unless replaced_by names the new order the human asked for in its place (placed or approved). Place "
+        "the replacement first.",
+        annotations=_DECIDE,
+    )
+    async def cancel_order(
+        ctx: ToolContext,
+        order_id: str,
+        reason: Annotated[str, Field(max_length=1000, description="The buyer's reason, kept in the audit trail")],
+        replaced_by: Annotated[
+            str | None,
+            Field(
+                max_length=64,
+                description="Only when the buyer asked to replace the order: the new order, already placed",
+            ),
+        ] = None,
+    ) -> Annotated[CallToolResult, OrderView]:
+        replacement = (replaced_by or "").strip() or None
+
+        async def call(svc: ProcurementService, agent: AgentPrincipal) -> OrderView:
+            order = svc.get_order(agent, order_id)
+            # The status read here decides whether the human is asked; the cancel is refused if it moves on meanwhile.
+            seen = order.status if order.status != OrderStatus.CANCELLED else None
+            if not svc.cancel_needs_human(order, replacement):
+                via: CancelVia = "replacement" if replacement and order.status == OrderStatus.APPROVED else "agent"
+                return await svc.cancel(
+                    agent, order_id, reason=reason, replaced_by=replacement, confirmed_via=via, expected_status=seen
+                )
+            _require_elicitation(ctx, "cancel_order", "a cancel confirmation form", "cancel")
+            if not reason.strip():
+                raise OrderError("reason_required", "Give the reason for cancelling the order", status=422)
+            answer = await ctx.elicit(_cancel_message(order, reason.strip()), _cancel_form(reason.strip()))
+            log.info("cancel_elicited order_id=%s action=%s", order_id, answer.action)
+            if answer.action != "accept" or not answer.data.confirm:
+                raise OrderError(
+                    "cancel_declined",
+                    f"The human declined to cancel order {order_id}; it stays {order.status.value}",
+                    details={"action": answer.action},
+                )
+            return await svc.cancel(
+                agent,
+                order_id,
+                reason=answer.data.reason.strip() or reason,
+                confirmed_via="mcp_elicitation",
+                expected_status=seen,
+            )
+
+        return await _run(ctx, "cancel_order", call, _order_summary)
 
     return mcp

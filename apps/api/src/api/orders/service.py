@@ -1,7 +1,9 @@
-"""Order reads and approval decisions: pending_approval -> approved | rejected.
+"""Order reads and status transitions: pending_approval -> approved | rejected, placed | approved -> shipped,
+and placed | pending_approval | approved -> cancelled.
 
-Orders are created by `ProcurementService.place_order`, which also decides who may approve; this service
-owns the state transition itself.
+Orders are created by `ProcurementService.place_order`, which also decides who may approve or cancel; this
+service owns the state transition itself. Every transition re-reads the order under its lock, so a ship and a
+cancel racing on one order cannot both win.
 """
 
 import asyncio
@@ -9,13 +11,25 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from api.orders.models import AuditEntry, ConfirmedVia, DecidedBy, Order, OrderDecision, OrderStatus, utcnow
+from api.orders.models import (
+    AuditEntry,
+    Cancellation,
+    CancelVia,
+    ConfirmedVia,
+    DecidedBy,
+    Order,
+    OrderDecision,
+    OrderStatus,
+    utcnow,
+)
 from api.orders.store import Store
 from api.valio.client import ProductQuote
 
 log = logging.getLogger(__name__)
 
 _PRICE_EPSILON = 1e-6
+_SHIPPABLE = (OrderStatus.PLACED, OrderStatus.APPROVED)
+_CANCELLABLE = (OrderStatus.PLACED, OrderStatus.PENDING_APPROVAL, OrderStatus.APPROVED)
 
 
 class OrderError(Exception):
@@ -138,6 +152,105 @@ class OrderService:
             log.info("order_closed_stale order_id=%s products=%s", order.id, ",".join(short))
             return order
 
+    async def ship(self, order_id: str) -> Order:
+        """Mark an order shipped; from then on it can no longer be cancelled. Shipping it again is a no-op."""
+        async with self._locks[order_id]:
+            order = self.get(order_id)
+            if order.status == OrderStatus.SHIPPED:
+                return order
+            if order.status not in _SHIPPABLE:
+                raise OrderError(
+                    "invalid_state",
+                    f"Order {order.id} is {order.status.value}; only placed or approved orders can ship",
+                )
+            previous = order.status
+            order.status = OrderStatus.SHIPPED
+            order.updated_at = order.shipped_at = utcnow()
+            self._store.save_order(
+                order,
+                [
+                    AuditEntry(
+                        order_id=order.id,
+                        at=order.updated_at,
+                        actor="system",
+                        action=OrderStatus.SHIPPED.value,
+                        summary="Shipped from the warehouse",
+                        details={"from": previous.value, "to": OrderStatus.SHIPPED.value},
+                    )
+                ],
+            )
+            log.info("order_shipped order_id=%s from=%s", order.id, previous.value)
+            return order
+
+    async def cancel(
+        self,
+        order_id: str,
+        *,
+        reason: str,
+        cancelled_by: DecidedBy,
+        confirmed_via: CancelVia,
+        replaced_by: str | None = None,
+        expected_status: OrderStatus | None = None,
+    ) -> Order:
+        """Cancel an order that has not shipped. Cancelling it again returns it unchanged.
+
+        The status read here, under the lock, is what decides a race with `ship`; callers' checks are advisory.
+        `expected_status` is the status the caller based its decision on (such as whether a human must confirm);
+        if the order moved on since, the cancel is refused with `status_changed`.
+        """
+        async with self._locks[order_id]:
+            order = self.get(order_id)
+            if order.status == OrderStatus.CANCELLED:
+                return order
+            require_cancellable(order)
+            if expected_status is not None and order.status != expected_status:
+                raise OrderError(
+                    "status_changed",
+                    f"Order {order.id} is now {order.status.value} (was {expected_status.value}); read it and "
+                    "cancel again",
+                    details={"was": expected_status.value, "now": order.status.value},
+                )
+            previous = order.status
+            order.status = OrderStatus.CANCELLED
+            order.updated_at = utcnow()
+            order.cancellation = Cancellation(
+                reason=reason,
+                at=order.updated_at,
+                cancelled_by=cancelled_by,
+                confirmed_via=confirmed_via,
+                replaced_by=replaced_by,
+            )
+            replaced = f", replaced by {replaced_by}" if replaced_by else ""
+            self._store.save_order(
+                order,
+                [
+                    AuditEntry(
+                        order_id=order.id,
+                        at=order.updated_at,
+                        actor="approver" if confirmed_via == "mcp_elicitation" else "agent",
+                        action=OrderStatus.CANCELLED.value,
+                        summary=f"Cancelled by {cancelled_by.name} ({cancelled_by.agent_id}){replaced}: {reason}",
+                        agent_id=cancelled_by.agent_id,
+                        details={
+                            "from": previous.value,
+                            "to": OrderStatus.CANCELLED.value,
+                            "cancelled_by": cancelled_by.model_dump(),
+                            "confirmed_via": confirmed_via,
+                            "replaced_by": replaced_by,
+                        },
+                    )
+                ],
+            )
+            log.info(
+                "order_cancelled order_id=%s agent_id=%s from=%s via=%s replaced_by=%s",
+                order.id,
+                cancelled_by.agent_id,
+                previous.value,
+                confirmed_via,
+                replaced_by,
+            )
+            return order
+
     @staticmethod
     def _require_pending(order: Order) -> None:
         if order.status != OrderStatus.PENDING_APPROVAL:
@@ -169,6 +282,21 @@ class OrderService:
             ),
             agent_id=decided_by.agent_id,
             details={"lines": changed, "old_total": old_total, "new_total": order.total},
+        )
+
+
+def require_cancellable(order: Order) -> None:
+    if order.status == OrderStatus.SHIPPED:
+        raise OrderError(
+            "already_shipped",
+            f"Order {order.id} has shipped and can no longer be cancelled; contact Valio Aimo customer service",
+            details={"shipped_at": order.shipped_at.isoformat() if order.shipped_at else None},
+        )
+    if order.status not in _CANCELLABLE:
+        raise OrderError(
+            "invalid_state",
+            f"Order {order.id} is {order.status.value}; only placed, pending_approval or approved orders "
+            "can be cancelled",
         )
 
 
@@ -241,6 +369,8 @@ def render_audit_text(order: Order, entries: list[AuditEntry]) -> str:
         if e.action == "repriced":
             prices = "; ".join(f"{li['product_id']} {li['was']:.2f} -> {li['now']:.2f}" for li in d.get("lines", []))
             out.append(f"    total {d['old_total']:.2f} -> {d['new_total']:.2f} {order.currency} ({prices})")
+        if d.get("replaced_by"):
+            out.append(f"    replaced by: {d['replaced_by']}")
         if d.get("confirmed_via"):
             out.append(f"    confirmed via: {d['confirmed_via']}")
     return "\n".join(out)

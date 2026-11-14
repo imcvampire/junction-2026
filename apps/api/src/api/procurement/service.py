@@ -20,9 +20,16 @@ from zoneinfo import ZoneInfo
 
 from api.agents.models import AgentPrincipal
 from api.catalog.index import Catalog, Product
-from api.orders.models import AuditEntry, ConfirmedVia, DecidedBy, Order, OrderLine, OrderStatus, utcnow
+from api.orders.models import AuditEntry, CancelVia, ConfirmedVia, DecidedBy, Order, OrderLine, OrderStatus, utcnow
 from api.orders.policy import ApprovalPolicy
-from api.orders.service import OrderError, OrderService, quote_changes, render_audit_text, repriced_total
+from api.orders.service import (
+    OrderError,
+    OrderService,
+    quote_changes,
+    render_audit_text,
+    repriced_total,
+    require_cancellable,
+)
 from api.orders.store import QuoteAlreadyUsedError, ReferenceTakenError, Store
 from api.procurement.schemas import (
     MAX_LINE_QUANTITY,
@@ -369,6 +376,46 @@ class ProcurementService:
         )
         return OrderView.of(decided)
 
+    async def cancel(
+        self,
+        agent: AgentPrincipal,
+        order_id: str,
+        *,
+        reason: str,
+        confirmed_via: CancelVia,
+        replaced_by: str | None = None,
+        expected_status: OrderStatus | None = None,
+    ) -> OrderView:
+        """Cancel an unshipped order of the customer. A `replaced_by` must name a newer placed or approved order."""
+        order = self._visible_order(agent, order_id)
+        if order.status == OrderStatus.CANCELLED:
+            return OrderView.of(order)
+        require_cancellable(order)
+        reason = reason.strip()
+        if not reason:
+            raise OrderError("reason_required", "Give the reason for cancelling the order", status=422)
+        replaced_by = (replaced_by or "").strip() or None
+        if replaced_by:
+            self._check_replacement(agent, order, replaced_by)
+        cancelled = await self._orders.cancel(
+            order.id,
+            reason=reason,
+            cancelled_by=DecidedBy(agent_id=agent.agent_id, name=agent.name),
+            confirmed_via=confirmed_via,
+            replaced_by=replaced_by,
+            expected_status=expected_status,
+        )
+        return OrderView.of(cancelled)
+
+    @staticmethod
+    def cancel_needs_human(order: OrderView, replaced_by: str | None) -> bool:
+        """Cancelling an approved order undoes a human decision, unless it replaces it with one the human asked for."""
+        return order.status == OrderStatus.APPROVED and not (replaced_by or "").strip()
+
+    async def ship(self, agent: AgentPrincipal, order_id: str) -> OrderView:
+        order = self._visible_order(agent, order_id)
+        return OrderView.of(await self._orders.ship(order.id))
+
     def audit(self, agent: AgentPrincipal, order_id: str) -> AuditView:
         order = self._visible_order(agent, order_id)
         entries = self._store.audit(order.id)
@@ -387,6 +434,32 @@ class ProcurementService:
                 for li in order.lines
             ],
         }
+
+    def _check_replacement(self, agent: AgentPrincipal, order: Order, replacement_id: str) -> None:
+        def invalid(why: str) -> OrderError:
+            return OrderError(
+                "invalid_replacement",
+                f"{replacement_id} cannot replace order {order.id}: {why}",
+                status=422,
+                details={"replaced_by": replacement_id},
+            )
+
+        if replacement_id == order.id:
+            raise invalid("an order cannot replace itself")
+        try:
+            new = self._visible_order(agent, replacement_id)
+        except OrderError:
+            raise invalid("no such order of this customer") from None
+        if new.created_at <= order.created_at:
+            raise invalid("the replacement must be placed after the order it replaces")
+        if new.status == OrderStatus.PENDING_APPROVAL:
+            raise OrderError(
+                "replacement_pending",
+                f"Replacement {new.id} is still pending_approval; keep order {order.id} until it is approved",
+                details={"replaced_by": new.id, "status": new.status.value},
+            )
+        if new.status not in (OrderStatus.PLACED, OrderStatus.APPROVED):
+            raise invalid(f"it is {new.status.value}; only a placed or approved order can replace another")
 
     def _require_future(self, delivery_date: date) -> None:
         if delivery_date < self._now().astimezone(HELSINKI).date():

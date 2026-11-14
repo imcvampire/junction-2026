@@ -40,17 +40,27 @@ flowchart TB
     RA -- "only price changed" --> H
     RA -- "stock short" --> ST["order closed: tell the buyer what ran out, keep their request and answers"]
     ST --> B
-    H -- No --> N(["cancel and record the reason"])
+    H -- No --> N(["reject and record the reason"])
     R -- Yes --> G["place order at fixed price"]
     R -- No --> P
     G --> O(["send confirmation and decision record"])
+    G -. "buyer asks to cancel or replace" .-> X{"order already shipped"}
+    HL -. "buyer asks to cancel or replace" .-> X
+    X -- Yes --> X1(["too late: contact Valio Aimo customer service"])
+    X -- No --> XA{"order approved by a human"}
+    XA -- No --> XC(["cancel with the buyer's reason"])
+    XA -- Yes --> XR{"replacing it with a new placed or approved order the buyer asked for"}
+    XR -- Yes --> XC
+    XR -- No --> XH{"prompt the human: confirm the cancel"}
+    XH -- Yes --> XC
+    XH -- No --> XK(["order stands"])
 
     classDef customer fill:#e8f1ff,stroke:#3b6fd8
     classDef aimo fill:#e9f7ee,stroke:#2f9e5b
     classDef human fill:#fff4e0,stroke:#d08a12
     class A,A1,A2,E,S customer
-    class A3,A4,B,C,D,U,J,L,P,I,K,F,R,RA,ST,G,HL aimo
-    class Q1,Q2,IN,H human
+    class A3,A4,B,C,D,U,J,L,P,I,K,F,R,RA,ST,G,HL,X,XA,XR aimo
+    class Q1,Q2,IN,H,XH human
 
 ```
 
@@ -78,3 +88,14 @@ writes the reason in the form (optional for an approval). A price change is show
 `RA -- "only price changed" --> H` is one prompt, not two. Declining or dismissing the form leaves
 the order pending (`decision_cancelled`); only a reject chosen in the form takes the `H -- No` path. Over
 REST the agent asks with its own dialog and confirms a changed price with `expected_total`.
+
+**Cancel until shipped.** After an order is placed (`G`) or held for approval (`HL`), the buyer can ask
+the agent to cancel or replace it. A shipped order cannot be cancelled (`already_shipped`): the buyer
+contacts Valio Aimo customer service. A `placed` or `pending_approval` order is cancelled by the agent
+with the buyer's reason. An `approved` order undoes a human decision, so on MCP `cancel_order` shows
+the human the server's confirm form (`XH`); declining leaves the order as it was (`cancel_declined`).
+The exception is a replacement the buyer asked for (`XR`): the agent places the new order first, and
+once it is `placed` or `approved` cancels the old one with `replaced_by`, with no form. While the new
+order is still pending approval, the old one is kept (`replacement_pending`). Over REST there is no
+form, and the cancel is recorded as `confirmed_via: rest`. Shipping is a wholesaler event; in the
+demo the ops route `POST /api/orders/{id}/ship` stands in for it.

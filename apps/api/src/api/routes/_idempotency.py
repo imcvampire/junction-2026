@@ -7,7 +7,7 @@ from fastapi import Header
 from pydantic import BaseModel
 
 from api.agents.models import AgentPrincipal
-from api.orders.models import Decision
+from api.orders.models import CancelRequest, Decision
 from api.orders.store import Store
 from api.procurement.schemas import OrderView
 from api.services import Services
@@ -42,5 +42,23 @@ async def idempotent_decision(
         OrderView,
         lambda: svc.procurement.decide(
             agent, order_id, approve=approve, reason=body.reason, expected_total=body.expected_total
+        ),
+    )
+
+
+async def idempotent_cancel(
+    svc: Services, agent: AgentPrincipal, order_id: str, body: CancelRequest, *, key: str | None
+) -> OrderView:
+    """Cancel; a repeated key from the same agent replays the first response.
+
+    REST cannot ask the human itself, so the cancel is recorded as `confirmed_via: rest`, approved orders included.
+    """
+    return await idempotent(
+        svc.store,
+        f"cancel:{agent.agent_id}:{order_id}",
+        key,
+        OrderView,
+        lambda: svc.procurement.cancel(
+            agent, order_id, reason=body.reason, replaced_by=body.replaced_by, confirmed_via="rest"
         ),
     )

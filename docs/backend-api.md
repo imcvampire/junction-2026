@@ -76,10 +76,11 @@ claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp
 | `list_pending_approvals` | `GET /api/agent/v1/approvals?limit=` | The customer's `pending_approval` orders, oldest first |
 | `approve_order` | `POST /api/agent/v1/orders/{id}/approve` `{reason, expected_total?}` | Re-check price and stock, then approve. MCP asks the human through elicitation; REST is idempotent with `Idempotency-Key` |
 | `reject_order` | `POST /api/agent/v1/orders/{id}/reject` `{reason}` | Reject; no upstream call. MCP asks the human through elicitation |
+| `cancel_order` | `POST /api/agent/v1/orders/{id}/cancel` `{reason, replaced_by?}` | Cancel an order that has not shipped; see [Cancel](#cancel). MCP asks the human for an approved order; REST is idempotent with `Idempotency-Key` |
 
 MCP tools return `structuredContent` that matches their `outputSchema`, plus a text block holding a
 one-line summary followed by the same JSON. Read tools are annotated `readOnlyHint`; `place_order`
-is `idempotentHint` because of `client_reference`. `approve_order` and `reject_order` are
+is `idempotentHint` because of `client_reference`. `approve_order`, `reject_order` and `cancel_order` are
 `destructiveHint`, so hosts such as Claude Code ask before calling them. Every caller sees all tools.
 
 The MCP endpoint is stateful (`Mcp-Session-Id`) and answers tool calls as SSE streams, because the
@@ -133,13 +134,18 @@ tool result with `isError: true`, including argument-schema errors (`invalid_arg
 | `invalid_arguments` | 422 | Schema validation failed (MCP); REST returns FastAPI's own 422 body |
 | `invalid_date`, `unknown_product`, `duplicate_product`, `line_not_in_quote`, `invalid_quantity`, `idempotency_key_mismatch` | 422 | Bad request content |
 | `mandate_violation` | 422 | A line breaks the company mandate; nothing was created |
-| `reason_required` | 422 | A rejection with an empty reason |
+| `reason_required` | 422 | A rejection or cancel with an empty reason |
+| `invalid_replacement` | 422 | Cancel: `replaced_by` is missing, the same order, older, another customer's, or not `placed`/`approved`; nothing changed |
 | `product_not_found`, `quote_not_found`, `order_not_found` | 404 | Missing, or not visible to this key (another agent's or another customer's) |
 | `quote_expired`, `quote_already_used`, `quote_changed`, `not_deliverable`, `client_reference_reused`, `invalid_state` | 409 | Refused by the rules; nothing was created |
 | `price_changed` | 409 | Approval: the price moved since placement, or `expected_total` does not match the current total; the order stays pending. `details`: `changes`, `old_total`, `new_total` |
+| `already_shipped` | 409 | Cancel: the order has shipped (`details.shipped_at`); nothing changed |
+| `status_changed` | 409 | MCP cancel: the status moved between the tool's read and the cancel, such as an approval landing (`details.was`, `now`); nothing changed |
+| `replacement_pending` | 409 | Cancel: the `replaced_by` order is still `pending_approval` (`details.replaced_by`, `status`); the old order is kept |
 | `stock_changed` | 409 | Approval: stock, a sales block or a missing price means the order cannot be filled; the order was closed. `details`: `changes`, `order`, `rerun` |
 | `decision_cancelled` | — | MCP only: the human declined or cancelled the approval form; nothing was decided |
-| `elicitation_required` | — | MCP only: the client did not advertise form elicitation; nothing was decided |
+| `cancel_declined` | — | MCP only: the human declined the cancel form for an approved order; nothing changed |
+| `elicitation_required` | — | MCP only: the client did not advertise form elicitation; nothing was decided or cancelled |
 | `rate_limited` | 429 | Agent quote budget used; `details.retry_after_s` |
 | `upstream_not_configured` | 503 | Valio settings missing |
 | `upstream_rate_limited` | 429 | Valio Aimo throttled us |
@@ -195,9 +201,51 @@ service rules as the decision tools:
 | Method and path | Purpose |
 |---|---|
 | `POST /api/orders/{id}/approve`, `/reject` `{reason, expected_total?}` | Decide a `pending_approval` order (idempotent with `Idempotency-Key`) |
+| `POST /api/orders/{id}/cancel` `{reason, replaced_by?}` | Cancel an unshipped order (idempotent with `Idempotency-Key`) |
+| `POST /api/orders/{id}/ship` | Ops: mark a `placed` or `approved` order shipped, in place of a warehouse feed |
 | `GET /api/orders/{id}`, `/audit`, `/audit.txt` | Read an order of the company, and its trail |
 | `GET /api/products?q=&tag=` | Public static catalog search |
 | `GET /api/health` | Liveness |
+
+## Cancel
+
+Order statuses are `placed`, `pending_approval`, `approved`, `rejected`, `shipped` and `cancelled`
+(`draft` and `agreed` belong to the retired buyer flow). An order can be cancelled while it is
+`placed`, `pending_approval` or `approved`. Once it is `shipped` the cancel is refused with
+`already_shipped`; a `rejected` order gives `invalid_state`. A reason is required. Cancelling an
+already cancelled order returns it unchanged. Nothing is sent upstream: the mock Valio API has no
+order endpoints.
+
+`OrderView.cancellation` records `reason`, `at`, `cancelled_by` (`agent_id`, `name`),
+`confirmed_via` and `replaced_by`. An approved order that is cancelled keeps its `decision`.
+
+Who decides:
+
+- `placed` and `pending_approval`: the agent cancels alone (`confirmed_via: agent` on MCP).
+- `approved` on MCP: `cancel_order` sends an elicitation naming the order, its total and delivery,
+  the approval it undoes and the agent's reason. The form has `confirm` (default true) and `reason`
+  (default the agent's reason). Decline, cancel or `confirm: false` gives `cancel_declined`; a client
+  without form elicitation gets `elicitation_required`. The human's reason is recorded with
+  `confirmed_via: mcp_elicitation` and audit actor `approver`.
+- `approved` with `replaced_by` on MCP: no form. The server checks that `replaced_by` is another
+  order of the same customer, created after this one, and `placed` or `approved`
+  (`invalid_replacement` otherwise, `replacement_pending` while it awaits approval). It records
+  `confirmed_via: replacement`. `replaced_by` is accepted on any cancellable order and recorded.
+- REST cancels every cancellable order and records `confirmed_via: rest`.
+
+**Shipping.** The mock API has no fulfilment signal, so an ops route stands in for the warehouse:
+
+```sh
+curl -X POST localhost:8000/api/orders/<order_id>/ship
+```
+
+It moves a `placed` or `approved` order to `shipped` and sets `shipped_at`; shipping again returns it
+unchanged, and any other status gives `invalid_state`. Ship and cancel take the same per-order lock
+and re-read the status under it, so when they race exactly one wins and the other gets
+`already_shipped` or `invalid_state`. `cancel_order` also passes the status it based the
+form decision on, so an order approved between that read and the cancel is refused with
+`status_changed` instead of being cancelled without the human. A shipped order always answers
+`already_shipped`, before the reason or `replaced_by` is checked.
 
 ## Audit trail
 
@@ -206,7 +254,10 @@ every option the server quoted (with price, coverage and requirement checks), th
 agent's reason, approval reasons and the spend limit applied. Decisions add an entry with actor
 `approver`, the deciding agent's `agent_id`, `details.decided_by` (`agent_id`, `name`),
 `details.confirmed_via` and the reason. A repriced approval adds a `repriced` entry with per-line old
-and new prices and totals. A system closure has actor `system` and the `changes` that closed it.
+and new prices and totals. A system closure has actor `system` and the `changes` that closed it. A cancel adds a `cancelled`
+entry with actor `agent` (or `approver` when the human confirmed through the form) and
+`details.cancelled_by`, `confirmed_via` and `replaced_by`; shipping adds a `shipped` entry with actor
+`system`.
 `audit.txt` renders this as plain text.
 
 ## Known demo limitations
@@ -223,4 +274,11 @@ These are accepted product decisions for the hackathon demo, not oversights.
 - There is no authentication on `/mcp` or the REST routes: anyone who can reach the server can
   quote, order and decide escalations as the shared agent. Keep it on localhost or a trusted
   network. OAuth 2.1 is the production path.
+- `POST /api/orders/{id}/ship` stands in for fulfilment. Anyone who can reach the server can mark an
+  order shipped, and nothing ships on its own.
+- A cancel with `replaced_by` skips the human's confirmation for an approved order. The server checks
+  that the replacement exists and is committed, but cannot prove the human asked for it; the skill
+  allows it only on the buyer's explicit instruction, and the audit records `confirmed_via:
+  replacement` with both order ids. REST cancels of approved orders are recorded as
+  `confirmed_via: rest`, the same limit REST decisions have.
 - The per-agent quote budget is held in memory, so it resets on restart and is per process.

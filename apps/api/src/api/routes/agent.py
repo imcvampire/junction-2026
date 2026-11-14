@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Query
 from fastapi.responses import PlainTextResponse
 
-from api.orders.models import Decision, OrderStatus
+from api.orders.models import CancelRequest, Decision, OrderStatus
 from api.orders.service import OrderError
 from api.procurement.schemas import (
     MAX_SEARCH_RESULTS,
@@ -22,7 +22,7 @@ from api.procurement.schemas import (
     SearchRequest,
     SearchResult,
 )
-from api.routes._idempotency import IdempotencyKey, idempotent_decision
+from api.routes._idempotency import IdempotencyKey, idempotent_cancel, idempotent_decision
 from api.services import Agent, Deps
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
@@ -108,6 +108,13 @@ async def approve_order(
 @router.post("/orders/{order_id}/reject")
 async def reject_order(svc: Deps, agent: Agent, order_id: str, body: Decision, key: IdempotencyKey = None) -> OrderView:
     return await idempotent_decision(svc, agent, order_id, body, approve=False, key=key)
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order(
+    svc: Deps, agent: Agent, order_id: str, body: CancelRequest, key: IdempotencyKey = None
+) -> OrderView:
+    return await idempotent_cancel(svc, agent, order_id, body, key=key)
 
 
 @router.get("/orders/{order_id}")

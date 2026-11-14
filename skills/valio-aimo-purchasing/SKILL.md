@@ -1,6 +1,6 @@
 ---
 name: valio-aimo-purchasing
-description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday").
+description: Buy food-service products from Valio Aimo through its MCP server - find products, get live customer prices and availability, convert litres or kilograms into sales units, and place orders at fixed quoted prices within your mandate, sending orders over the spend limit to a human, who approves or rejects them through the server's own confirmation form, and cancel or replace orders until they ship. Use when a buyer asks to source, price, compare or order products from Valio Aimo (for example "1,000 litres of lactose-free milk by Monday").
 ---
 
 # Valio Aimo purchasing
@@ -193,6 +193,30 @@ How a decision works:
 On MCP the audit records `confirmed_via: mcp_elicitation`. Over REST there is no form: the server
 records `confirmed_via: rest` and cannot prove a human said yes, so that check is your job there.
 
+## Cancelling or replacing an order
+
+Cancel only when the buyer asks, and always pass their reason as `reason`. An order can be cancelled
+until it ships: `placed`, `pending_approval` and `approved` orders can be cancelled, `shipped` ones
+cannot.
+
+- `placed` or `pending_approval`: call `cancel_order` with the `order_id` and the buyer's reason.
+  No one else is asked.
+- `approved`: a human approved it, so `cancel_order` shows the human the server's own form with the
+  order and the approval it undoes. Do not ask again in chat first; the form is the question. The
+  reason recorded is the one the human gives there. On `cancel_declined`, the order stands.
+- Replace: only when the buyer explicitly says to replace the order with another. Run the normal
+  procedure for the new order first (quote, choose, `place_order`). Once the new order is `placed`
+  or `approved`, call `cancel_order(old_id, reason, replaced_by=new_id)`; no form is shown for an
+  approved old order, because the buyer already asked for the swap. If the new order is
+  `pending_approval`, keep the old one, tell the buyer both orders exist, and cancel the old one
+  only after the new one is approved. Never use `replaced_by` on your own initiative: the audit
+  trail records it as the buyer's instruction.
+- `already_shipped`: it is too late to cancel through the agent. Tell the buyer to contact Valio
+  Aimo customer service, and do not retry.
+
+Report the resulting status and `cancellation` (reason, who cancelled, `confirmed_via`, and
+`replaced_by` when set).
+
 ## Errors
 
 A refused call comes back as a tool error whose text is the JSON `{code, message, details}`.
@@ -204,7 +228,7 @@ A refused call comes back as a tool error whose text is the JSON `{code, message
 | `price_changed` | At approval, the price moved since the order was placed; the order is still pending. `details` has the per-line `was`/`now`, `old_total` and `new_total`. | On MCP the form already shows the new total, so this comes only from a stale REST call: show the buyer the old and new totals, and approve again with `expected_total` set to `new_total` only after they confirm. |
 | `stock_changed` | At approval, stock (or a sales block) no longer covers the order. The server closed it (`rejected`, decided by the system). | Tell the buyer what ran out (`details.changes`). Then re-run from step 3 with `details.rerun`: reuse its request text, requirements, purpose and delivery date, and ask the buyer only to choose among the new options. |
 | `decision_cancelled` | The human declined or dismissed the approval form; nothing was decided. | Report it. Do not retry unless the human asks again. |
-| `elicitation_required` | This MCP host cannot show the approval form. | Tell the buyer to decide in the order console. Do not try another way to decide. |
+| `elicitation_required` | This MCP host cannot show the approval or cancel form. | Tell the buyer to decide or cancel in the order console. Do not try another way. |
 | `quote_expired` | The quote is older than its `expires_at`. | Quote again. |
 | `quote_already_used` | An order was already placed from this quote. | Check `details.order_id` with `get_order`; quote again for a new order. |
 | `quote_not_found` | Unknown quote, or it belongs to another agent. | Quote again. |
@@ -216,8 +240,13 @@ A refused call comes back as a tool error whose text is the JSON `{code, message
 | `duplicate_product` | The same product appears twice in one quote or order. | Merge the lines. |
 | `unknown_product`, `product_not_found` | No such product id. | Search again; do not guess ids. |
 | `order_not_found` | Unknown order, or another customer's. | Check the id from your own `place_order` or `list_orders`. |
-| `reason_required` | The rejection had an empty reason. | Ask the human for their reason with a dialog. |
-| `invalid_state` | The order is not `pending_approval` (already placed, closed, or decided the other way). | Read it with `get_order` and report its status. |
+| `reason_required` | The rejection or cancel had an empty reason. | Ask the human for their reason with a dialog. |
+| `invalid_state` | The order is not in a state that allows the call: deciding needs `pending_approval`, cancelling needs `placed`, `pending_approval` or `approved`. | Read it with `get_order` and report its status. |
+| `already_shipped` | The order has shipped (`details.shipped_at`); nothing was cancelled. | Tell the buyer to contact Valio Aimo customer service. Do not retry. |
+| `status_changed` | The order's status moved while you cancelled (`details.was`, `details.now`); nothing was cancelled. | Read it with `get_order`, tell the buyer, and cancel again only if they still want it. |
+| `cancel_declined` | The human declined the cancel form; the approved order stands. | Report it. Do not retry unless the human asks again. |
+| `replacement_pending` | The `replaced_by` order is still `pending_approval`; the old order was kept. | Tell the buyer both orders exist; cancel the old one once the new one is approved. |
+| `invalid_replacement` | `replaced_by` is not a newer `placed` or `approved` order of this customer, or is the same order. | Check the id you got from `place_order`; never guess it. |
 | `rate_limited` | Quote budget used for this minute. | Wait `details.retry_after_s`, and quote fewer, better candidates. |
 | `upstream_unavailable`, `upstream_rate_limited` | Valio Aimo's price service is busy or down. | Wait and retry once, then tell the buyer. |
 | `upstream_error`, `upstream_rejected`, `upstream_not_configured`, `internal_error` | The server or Valio Aimo failed in a way retrying will not fix. | Tell the buyer and your operator; do not retry. |

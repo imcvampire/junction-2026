@@ -11,7 +11,7 @@ import pytest
 
 from api.agents.models import AgentPrincipal, Mandate
 from api.catalog.index import Catalog
-from api.orders.models import OrderStatus
+from api.orders.models import CancelVia, DecidedBy, OrderStatus
 from api.orders.policy import ApprovalPolicy
 from api.orders.service import OrderError, OrderService
 from api.orders.store import ReferenceTakenError, Store
@@ -717,5 +717,224 @@ def test_purpose_is_frozen_on_the_quote_and_carried_to_the_order_and_audit(
         with env.store.transaction() as c:
             c.execute("UPDATE orders SET data = ? WHERE id = ?", (json.dumps(data), order.order_id))
         assert env.svc.get_order(env.agent, order.order_id).purpose is None
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+async def placed(env: Env, ref: str = "small") -> Any:
+    env.clock[0] += timedelta(seconds=1)
+    order = await env.place(await env.quote(items(("462775", 10))), [("462775", 10)], ref)
+    assert order.status == OrderStatus.PLACED
+    return order
+
+
+async def approved(env: Env, ref: str = "big") -> Any:
+    env.clock[0] += timedelta(seconds=1)
+    order = await escalated(env, ref)
+    return await env.svc.decide(env.colleague(), order.order_id, approve=True, reason="gala")
+
+
+def by(agent: AgentPrincipal) -> DecidedBy:
+    return DecidedBy(agent_id=agent.agent_id, name=agent.name)
+
+
+def test_placed_and_approved_orders_ship_once(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+    async def body(env: Env) -> None:
+        for order in (await placed(env), await approved(env)):
+            shipped = await env.orders.ship(order.order_id)
+            assert shipped.status == OrderStatus.SHIPPED and shipped.shipped_at is not None
+            assert await env.orders.ship(order.order_id) == shipped
+            entries = env.svc.audit(env.agent, order.order_id).entries
+            assert [(e.actor, e.action) for e in entries if e.action == "shipped"] == [("system", "shipped")]
+            assert entries[-1].details == {"from": order.status.value, "to": "shipped"}
+
+        rejected = await escalated(env, "rejected")
+        await env.svc.decide(env.agent, rejected.order_id, approve=False, reason="no")
+        cancelled = await placed(env, "cancelled")
+        await env.orders.cancel(cancelled.order_id, reason="x", cancelled_by=by(env.agent), confirmed_via="agent")
+        for order_id in (rejected.order_id, cancelled.order_id, (await escalated(env, "pending")).order_id):
+            await refused("invalid_state", env.orders.ship(order_id))
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_unshipped_orders_cancel_with_the_actor_recorded(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        cases: list[tuple[Any, CancelVia, str]] = [
+            (await placed(env), "agent", "agent"),
+            (await escalated(env, "pending"), "agent", "agent"),
+            (await approved(env), "mcp_elicitation", "approver"),
+        ]
+        for order, via, actor in cases:
+            done = await env.orders.cancel(
+                order.order_id, reason="menu changed", cancelled_by=by(env.agent), confirmed_via=via
+            )
+            assert done.status == OrderStatus.CANCELLED and done.cancellation is not None
+            assert done.cancellation.reason == "menu changed" and done.cancellation.confirmed_via == via
+            entry = env.store.audit(order.order_id)[-1]
+            assert (entry.actor, entry.action, entry.agent_id) == (actor, "cancelled", env.agent.agent_id)
+            assert entry.details["from"] == order.status.value and entry.details["replaced_by"] is None
+            again = await env.orders.cancel(
+                order.order_id, reason="other", cancelled_by=by(env.agent), confirmed_via="agent"
+            )
+            assert again == done
+
+        kept = env.store.get_order(cases[2][0].order_id)
+        assert kept is not None and kept.decision is not None and kept.decision.approved
+
+        shipped = await placed(env, "shipped")
+        await env.orders.ship(shipped.order_id)
+        e = await refused(
+            "already_shipped",
+            env.orders.cancel(shipped.order_id, reason="x", cancelled_by=by(env.agent), confirmed_via="agent"),
+        )
+        assert e.status == 409 and e.details["shipped_at"] is not None
+        rejected = await escalated(env, "rejected")
+        await env.svc.decide(env.agent, rejected.order_id, approve=False, reason="no")
+        await refused(
+            "invalid_state",
+            env.orders.cancel(rejected.order_id, reason="x", cancelled_by=by(env.agent), confirmed_via="agent"),
+        )
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_ship_and_cancel_racing_on_one_order_have_one_winner(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        def cancel(order_id: str) -> Awaitable[Any]:
+            return env.orders.cancel(order_id, reason="race", cancelled_by=by(env.agent), confirmed_via="agent")
+
+        first, second = await placed(env, "a"), await placed(env, "b")
+        ship_wins = await asyncio.gather(
+            env.orders.ship(first.order_id), cancel(first.order_id), return_exceptions=True
+        )
+        cancel_wins = await asyncio.gather(
+            cancel(second.order_id), env.orders.ship(second.order_id), return_exceptions=True
+        )
+        for (won, lost), order_id, code in (
+            (ship_wins, first.order_id, "already_shipped"),
+            (cancel_wins, second.order_id, "invalid_state"),
+        ):
+            assert not isinstance(won, BaseException) and isinstance(lost, OrderError) and lost.code == code
+            stored = env.store.get_order(order_id)
+            assert stored is not None and stored.status == won.status
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_orders_stored_without_cancel_fields_still_load(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await placed(env)
+        stored = env.store.get_order(order.order_id)
+        assert stored is not None
+        data = stored.model_dump(mode="json")
+        del data["cancellation"], data["shipped_at"]
+        with env.store.transaction() as c:
+            c.execute("UPDATE orders SET data = ? WHERE id = ?", (json.dumps(data), order.order_id))
+        seen = env.svc.get_order(env.agent, order.order_id)
+        assert seen.cancellation is None and seen.shipped_at is None
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_cancel_needs_a_reason_and_is_scoped_to_the_customer(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await placed(env)
+        await refused("reason_required", env.svc.cancel(env.agent, order.order_id, reason="  ", confirmed_via="agent"))
+        rival = env.colleague(customer="cust-2", name="rival")
+        await refused("order_not_found", env.svc.cancel(rival, order.order_id, reason="x", confirmed_via="agent"))
+        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PLACED
+
+        done = await env.svc.cancel(env.colleague(), order.order_id, reason="  menu changed ", confirmed_via="rest")
+        assert done.cancellation is not None and done.cancellation.reason == "menu changed"
+        assert done.cancellation.cancelled_by.name == "ops"
+        again = await env.svc.cancel(env.agent, order.order_id, reason="", confirmed_via="agent")
+        assert again == done
+        assert "Cancelled by ops" in env.svc.audit(env.agent, order.order_id).text
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_a_replacement_must_be_a_newer_committed_order_of_the_customer(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        older = await placed(env, "older")
+        old = await approved(env, "old")
+        foreign = await env.place(
+            await env.quote(items(("462775", 10)), agent=env.other_agent()),
+            [("462775", 10)],
+            "foreign",
+            env.other_agent(),
+        )
+        rejected = await escalated(env, "rejected")
+        await env.svc.decide(env.agent, rejected.order_id, approve=False, reason="no")
+
+        def cancel(replacement: str) -> Awaitable[Any]:
+            return env.svc.cancel(
+                env.agent, old.order_id, reason="swap", replaced_by=replacement, confirmed_via="replacement"
+            )
+
+        for replacement in ("ord_missing", old.order_id, older.order_id, foreign.order_id, rejected.order_id):
+            e = await refused("invalid_replacement", cancel(replacement))
+            assert e.status == 422 and e.details == {"replaced_by": replacement}
+        env.clock[0] += timedelta(seconds=1)
+        pending = await escalated(env, "pending")
+        e = await refused("replacement_pending", cancel(pending.order_id))
+        assert e.status == 409 and e.details == {"replaced_by": pending.order_id, "status": "pending_approval"}
+        assert env.svc.get_order(env.agent, old.order_id).status == OrderStatus.APPROVED
+
+        new = await placed(env, "new")
+        done = await cancel(new.order_id)
+        assert done.cancellation is not None and done.cancellation.replaced_by == new.order_id
+        text = env.svc.audit(env.agent, old.order_id).text
+        assert f"replaced by {new.order_id}" in text and "confirmed via: replacement" in text
+
+        other = await placed(env, "other")
+        approved_new = await approved(env, "approved-new")
+        done = await env.svc.cancel(
+            env.agent, other.order_id, reason="swap", replaced_by=approved_new.order_id, confirmed_via="agent"
+        )
+        assert done.cancellation is not None and done.cancellation.replaced_by == approved_new.order_id
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_a_cancel_based_on_a_stale_status_or_of_a_shipped_order_is_refused_first(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env, "pending")
+        await env.svc.decide(env.colleague(), order.order_id, approve=True, reason="gala")
+        e = await refused(
+            "status_changed",
+            env.svc.cancel(
+                env.agent,
+                order.order_id,
+                reason="x",
+                confirmed_via="agent",
+                expected_status=OrderStatus.PENDING_APPROVAL,
+            ),
+        )
+        assert e.details == {"was": "pending_approval", "now": "approved"}
+        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.APPROVED
+
+        shipped = await placed(env, "shipped")
+        await env.orders.ship(shipped.order_id)
+        for reason, replacement in (("", None), ("x", "ord_missing")):
+            await refused(
+                "already_shipped",
+                env.svc.cancel(
+                    env.agent, shipped.order_id, reason=reason, replaced_by=replacement, confirmed_via="agent"
+                ),
+            )
 
     run(tmp_path, catalog, fake_valio, body)
