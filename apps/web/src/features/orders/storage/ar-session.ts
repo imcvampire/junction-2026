@@ -175,20 +175,28 @@ async function run(
   let anchor: XR | null = null
   let wantAnchor = false
 
+  // A stack over a real object (or off the floor) fades and reddens so it is
+  // clear it cannot go there; a clear spot is solid (placed) or see-through
+  // (still aiming).
+  const applyMaterials = () => {
+    const blocked = status === "blocked" || status === "no-floor"
+    const base = phase === "placed" ? 1 : 0.7
+    for (const m of packMaterials) {
+      m.opacity = blocked ? 0.2 : base
+      m.emissive.setHex(blocked ? BLOCKED_TINT : 0)
+      m.emissiveIntensity = blocked ? 0.6 : 0
+    }
+  }
   const setStatus = (next: PlacementStatus) => {
     if (next === status) return
     status = next
     cb.onStatus(next)
-    const tint = next === "blocked" || next === "no-floor" ? BLOCKED_TINT : 0
-    for (const m of packMaterials) {
-      m.emissive.setHex(tint)
-      m.emissiveIntensity = tint ? 0.6 : 0
-    }
+    applyMaterials()
   }
   const setPhase = (next: PlacementPhase) => {
     phase = next
     cb.onPhase(next)
-    for (const m of packMaterials) m.opacity = next === "placed" ? 1 : 0.7
+    applyMaterials()
   }
   setPhase("aiming")
   cb.onStatus(status)
@@ -297,6 +305,13 @@ async function run(
             t.orientation.w
           )
         }
+      }
+      // Keep checking depth after placing, so the plan fades if it ends up over
+      // a real object (someone walks in, or it was placed on one).
+      if (hasDepth && frameCount % DEPTH_EVERY_N_FRAMES === 0) {
+        setStatus(
+          classifyDepth(measureDepth(frame, viewerPose.views[0]), boxes)
+        )
       }
       renderer.render(scene, camera)
       return

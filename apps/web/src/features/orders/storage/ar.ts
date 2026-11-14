@@ -132,9 +132,28 @@ export function disposeObject(root: Three): void {
 }
 
 function buildScene(THREE: Three, blocks: Block[], room: Room): Scene {
+  // A simplified scene for USDZ / AR Quick Look: one solid, true-scale box per
+  // stack, centred on the origin with bottoms at y = 0. Deliberately NOT
+  // buildLayout: Quick Look mirrors the stacks in an included floor plane, and
+  // its USDZ exporter drops shared-geometry instances and line geometry — which
+  // left only one stack and a reflection. Each box here has its own geometry,
+  // there is no floor (the real floor grounds the stacks) and no edge lines.
   const scene = new THREE.Scene()
-  // Centred on the origin so Quick Look drops it neatly on the surface.
-  scene.add(buildLayout(THREE, blocks, room))
+  const ox = -room.width / 2
+  const oz = -room.depth / 2
+  const colors = stackColors(blocks)
+  for (const b of blocks) {
+    const hex = colors.get(b.id)?.hex ?? 0x888888
+    const mat = new THREE.MeshStandardMaterial({
+      color: hex,
+      roughness: 0.8,
+      metalness: 0,
+    })
+    const geometry = new THREE.BoxGeometry(b.w, b.h, b.d)
+    const mesh = new THREE.Mesh(geometry, mat)
+    mesh.position.set(ox + b.x + b.w / 2, b.h / 2, oz + b.z + b.d / 2)
+    scene.add(mesh)
+  }
   return scene
 }
 
@@ -143,6 +162,10 @@ export async function layoutToUsdz(blocks: Block[], room: Room): Promise<Blob> {
   const THREE = await loadThree()
   const { USDZExporter } = await import(/* @vite-ignore */ USDZ_URL)
   const scene = buildScene(THREE, blocks, room)
+  // The scene is never rendered before export, so without this every mesh keeps
+  // an identity matrixWorld and the exporter stacks them all at the origin —
+  // which is why only one box appeared. Update world matrices first.
+  scene.updateMatrixWorld(true)
   // Anchor to a horizontal plane so Quick Look sets the plan on the floor
   // (r160: parse is async and takes the AR options directly).
   const data = await new USDZExporter().parse(scene, {
