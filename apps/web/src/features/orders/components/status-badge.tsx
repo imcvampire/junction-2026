@@ -27,5 +27,9 @@ const LABEL: Record<OrderStatus, string> = {
 }
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
-  return <Badge variant={VARIANT[status] ?? "outline"}>{LABEL[status] ?? status}</Badge>
+  return (
+    <Badge variant={VARIANT[status] ?? "outline"}>
+      {LABEL[status] ?? status}
+    </Badge>
+  )
 }

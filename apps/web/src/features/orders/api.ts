@@ -1,8 +1,4 @@
-import type {
-  OrderList,
-  OrderView,
-  ProductView,
-} from "@/features/orders/types"
+import type { OrderList, OrderView, ProductView } from "@/features/orders/types"
 
 // The Vite dev server proxies /api to the backend (vite.config.ts). Every
 // caller is the shared company agent, so no key is needed.
@@ -25,7 +21,10 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
       signal,
     })
   } catch (cause) {
-    throw new ApiError(0, `Could not reach the API. Is the backend running? (${String(cause)})`)
+    throw new ApiError(
+      0,
+      `Could not reach the API. Is the backend running? (${String(cause)})`
+    )
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "")

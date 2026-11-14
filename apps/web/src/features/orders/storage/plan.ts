@@ -167,7 +167,8 @@ export function recommendedRoom(
   maxStackM: number = DEFAULT_MAX_STACK_M
 ): Room {
   const blocks = buildBlocks(items, maxStackM)
-  if (blocks.length === 0) return { width: RECOMMENDED_WIDTH_M, depth: 1.2, height: 2.2 }
+  if (blocks.length === 0)
+    return { width: RECOMMENDED_WIDTH_M, depth: 1.2, height: 2.2 }
   const widest = Math.max(...blocks.map((b) => b.w))
   const width = Math.max(RECOMMENDED_WIDTH_M, ceilTo(widest, 0.1))
   const laid = packRow(blocks, width)
@@ -230,8 +231,7 @@ export function fitReport(blocks: Block[], room: Room): FitReport {
     maxX = Math.max(maxX, b.x + b.w)
     maxZ = Math.max(maxZ, b.z + b.d)
   }
-  const usedFloorArea =
-    blocks.length === 0 ? 0 : (maxX - minX) * (maxZ - minZ)
+  const usedFloorArea = blocks.length === 0 ? 0 : (maxX - minX) * (maxZ - minZ)
   const roomFloorArea = room.width * room.depth
   return {
     fits: overflow.size === 0 && overlapping.size === 0,
@@ -243,7 +243,10 @@ export function fitReport(blocks: Block[], room: Room): FitReport {
   }
 }
 
-export function planSummary(items: StorageItem[], blocks: Block[]): PlanSummary {
+export function planSummary(
+  items: StorageItem[],
+  blocks: Block[]
+): PlanSummary {
   let totalPacks = 0
   let totalVolumeM3 = 0
   let totalGrossKg = 0

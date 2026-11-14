@@ -75,7 +75,10 @@ describe("buildBlocks", () => {
   })
 
   it("skips unsized items", () => {
-    const items = storageItems([line({ product_id: "B" })], new Map([["B", null]]))
+    const items = storageItems(
+      [line({ product_id: "B" })],
+      new Map([["B", null]])
+    )
     expect(buildBlocks(items)).toHaveLength(0)
   })
 })
@@ -84,7 +87,12 @@ describe("packRow", () => {
   it("wraps to a new row when the width is exceeded", () => {
     const items = storageItems(
       [line({ product_id: "A", quantity: 3 })],
-      new Map([["A", pack({ width_mm: 1000, length_mm: 1000, sales_units_per_pack: 1 })]])
+      new Map([
+        [
+          "A",
+          pack({ width_mm: 1000, length_mm: 1000, sales_units_per_pack: 1 }),
+        ],
+      ])
     )
     const blocks = buildBlocks(items, 0.2) // 3 columns, each 1 m wide
     const placed = packRow(blocks, 2.4, 0) // two fit per 2.4 m row
@@ -95,7 +103,12 @@ describe("packRow", () => {
   it("places stacks flush against each other by default", () => {
     const items = storageItems(
       [line({ product_id: "A", quantity: 3 })],
-      new Map([["A", pack({ width_mm: 1000, length_mm: 1000, sales_units_per_pack: 1 })]])
+      new Map([
+        [
+          "A",
+          pack({ width_mm: 1000, length_mm: 1000, sales_units_per_pack: 1 }),
+        ],
+      ])
     )
     const placed = packRow(buildBlocks(items, 0.2), 2.4)
     expect(placed.map((b) => [b.x, b.z])).toEqual([

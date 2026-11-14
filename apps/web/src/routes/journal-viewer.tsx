@@ -44,9 +44,10 @@ function JournalViewerPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="font-heading text-2xl font-semibold">Journal viewer</h1>
+        <h1 className="font-heading text-2xl font-semibold">Purchase audit</h1>
         <p className="text-sm text-muted-foreground">
-          Read what a purchasing agent did, from the journal file it wrote.
+          Open a journal file to see what the purchasing agent was asked, what
+          it did, and what it ordered.
         </p>
       </div>
       <JournalPicker onLoad={onLoad} />

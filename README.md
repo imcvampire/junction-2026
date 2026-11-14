@@ -48,7 +48,8 @@ feature is one route file in `apps/web/src/routes/` plus a folder in `apps/web/s
   the skill as `/skills/valio-aimo-purchasing.tar.gz`, built from `skills/valio-aimo-purchasing` in
   `deploy/web.Dockerfile`, so the curl install works only against a deployed site, not `pnpm dev`.
 - [Journal viewer](http://localhost:5173/journal-viewer): open one purchasing journal JSON file
-  that the agent wrote and read it top-down. The file is checked against
+  that the agent wrote and audit it as a buyer: what was asked, a step-by-step timeline that
+  highlights human decisions, and what was ordered, without tool names or ids. The file is checked against
   [`journal.schema.json`](skills/valio-aimo-purchasing/references/journal.schema.json) in the
   browser and never uploaded. A file that fails shows why, with the schema error paths.
 

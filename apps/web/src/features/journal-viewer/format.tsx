@@ -1,5 +1,7 @@
 import type { ReactNode } from "react"
 
+import { Badge } from "@/components/ui/badge"
+
 const LOCALE = "en-FI"
 const TIME_ZONE = "Europe/Helsinki"
 
@@ -98,22 +100,57 @@ function formatWith(format: Intl.DateTimeFormat, iso: string): string {
   return Number.isNaN(parsed.getTime()) ? iso : format.format(parsed)
 }
 
-export function DateTime({ value }: { value: Maybe<string> }) {
+export function DateTime({
+  value,
+  isoTitle = true,
+}: {
+  value: Maybe<string>
+  isoTitle?: boolean
+}) {
   if (isMissing(value)) return <Unknown />
   return (
-    <time dateTime={value} title={value}>
+    <time dateTime={value} title={isoTitle ? value : undefined}>
       {formatWith(dateTimeFormat, value)}
     </time>
   )
 }
 
-export function CalendarDate({ value }: { value: Maybe<string> }) {
+export function CalendarDate({
+  value,
+  isoTitle = true,
+}: {
+  value: Maybe<string>
+  isoTitle?: boolean
+}) {
   if (isMissing(value)) return <Unknown />
   return (
-    <time dateTime={value} title={value}>
+    <time dateTime={value} title={isoTitle ? value : undefined}>
       {formatWith(dateFormat, value)}
     </time>
   )
+}
+
+export function formatDuration(minutes: number): string {
+  if (minutes < 1) return "under a minute"
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`
+}
+
+export function Duration({
+  started,
+  finished,
+}: {
+  started: Maybe<string>
+  finished: Maybe<string>
+}) {
+  const start = started ? new Date(started).getTime() : NaN
+  const end = finished ? new Date(finished).getTime() : NaN
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+    return <Unknown />
+  }
+  return <>{formatDuration(Math.round((end - start) / 60_000))}</>
 }
 
 export function Field({
@@ -156,4 +193,19 @@ export function JournalSection({
 
 export function EmptyNote({ children }: { children: ReactNode }) {
   return <p className="text-sm text-muted-foreground">{children}</p>
+}
+
+const TONE_VARIANT = {
+  positive: "default",
+  waiting: "secondary",
+  negative: "destructive",
+  neutral: "outline",
+} as const
+
+export function ToneBadge({
+  label,
+}: {
+  label: { text: string; tone: keyof typeof TONE_VARIANT }
+}) {
+  return <Badge variant={TONE_VARIANT[label.tone]}>{label.text}</Badge>
 }

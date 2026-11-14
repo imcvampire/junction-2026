@@ -4,7 +4,8 @@ import { listOrders } from "@/features/orders/api"
 import { OrdersTable } from "@/features/orders/components/orders-table"
 
 export const Route = createFileRoute("/orders/")({
-  loader: ({ abortController }) => listOrders("company", abortController.signal),
+  loader: ({ abortController }) =>
+    listOrders("company", abortController.signal),
   component: OrdersPage,
   pendingComponent: () => (
     <p className="text-sm text-muted-foreground">Loading orders…</p>
