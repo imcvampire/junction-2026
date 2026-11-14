@@ -127,12 +127,28 @@ export function StoragePlanner({
     200
   )
   const svgRef = useRef<SVGSVGElement>(null)
-  const dragRef = useRef<{ id: string; dx: number; dz: number } | null>(null)
+  const dragRef = useRef<{
+    id: string
+    dx: number
+    dz: number
+    startX: number
+    startY: number
+    moved: boolean
+  } | null>(null)
+  const sliceSeq = useRef(0)
 
   function resetToRecommended(stack: number): void {
     const r = recommendedRoom(items, stack)
     setRoom(r)
     setBlocks(recommendLayout(items, r, stack))
+  }
+
+  // Changing a room dimension re-packs the stacks so they rearrange to fit the
+  // new room rather than being left outside it.
+  function changeRoom(patch: Partial<Room>): void {
+    const next = { ...room, ...patch }
+    setRoom(next)
+    setBlocks(recommendLayout(items, next, maxStack))
   }
 
   function metresAt(
@@ -153,12 +169,27 @@ export function StoragePlanner({
   ): void {
     e.currentTarget.setPointerCapture(e.pointerId)
     const p = metresAt(e.clientX, e.clientY)
-    dragRef.current = { id: block.id, dx: p.x - block.x, dz: p.z - block.z }
+    dragRef.current = {
+      id: block.id,
+      dx: p.x - block.x,
+      dz: p.z - block.z,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+    }
   }
 
   function onBlockPointerMove(e: React.PointerEvent<SVGGElement>): void {
     const drag = dragRef.current
     if (!drag) return
+    // Ignore tiny jitter so a tap (to slice) is not read as a drag (to move).
+    if (
+      !drag.moved &&
+      Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4
+    ) {
+      return
+    }
+    drag.moved = true
     const p = metresAt(e.clientX, e.clientY)
     setBlocks((bs) =>
       bs.map((b) =>
@@ -174,8 +205,37 @@ export function StoragePlanner({
   }
 
   function onBlockPointerUp(e: React.PointerEvent<SVGGElement>): void {
+    const drag = dragRef.current
     dragRef.current = null
     e.currentTarget.releasePointerCapture?.(e.pointerId)
+    // A tap with no real drag slices the stack in two.
+    if (drag && !drag.moved) sliceBlock(drag.id)
+  }
+
+  // Split a stack into two shorter stacks the buyer can place separately. The
+  // new slice (the top half) is set down beside the original to be dragged away.
+  function sliceBlock(id: string): void {
+    setBlocks((bs) => {
+      const idx = bs.findIndex((b) => b.id === id)
+      if (idx < 0 || bs[idx].packsInColumn < 2) return bs
+      const b = bs[idx]
+      const packH = b.h / b.packsInColumn
+      const top = Math.floor(b.packsInColumn / 2)
+      const bottom = b.packsInColumn - top
+      const kept: Block = { ...b, packsInColumn: bottom, h: bottom * packH }
+      const slice: Block = {
+        ...b,
+        id: `${b.id}|${sliceSeq.current++}`,
+        packsInColumn: top,
+        h: top * packH,
+        x: round(clamp(b.x + b.w + 0.05, -0.3, room.width + 0.3), 0.02),
+        z: b.z,
+      }
+      const next = [...bs]
+      next[idx] = kept
+      next.splice(idx + 1, 0, slice)
+      return next
+    })
   }
 
   const canPlan = summary.sizedLines > 0
@@ -194,8 +254,9 @@ export function StoragePlanner({
           <BoxIcon className="size-5" aria-hidden /> Storage plan
         </h2>
         <p className="text-sm text-muted-foreground">
-          A suggested way to store this delivery, at true scale. Drag the stacks
-          on the floor plan, see how packs stack up in 3D, then check it in AR.
+          A suggested way to store this delivery, at true scale. Drag a stack to
+          move it, tap it to slice it in two, see how packs stack up in 3D, then
+          check it in AR.
         </p>
       </div>
 
@@ -213,7 +274,7 @@ export function StoragePlanner({
               min={0.5}
               max={20}
               step={0.1}
-              onChange={(width) => setRoom((r) => ({ ...r, width }))}
+              onChange={(width) => changeRoom({ width })}
             />
             <NumberField
               label="Room depth (m)"
@@ -221,7 +282,7 @@ export function StoragePlanner({
               min={0.5}
               max={20}
               step={0.1}
-              onChange={(depth) => setRoom((r) => ({ ...r, depth }))}
+              onChange={(depth) => changeRoom({ depth })}
             />
             <NumberField
               label="Room height (m)"
@@ -229,7 +290,7 @@ export function StoragePlanner({
               min={0.5}
               max={6}
               step={0.1}
-              onChange={(height) => setRoom((r) => ({ ...r, height }))}
+              onChange={(height) => changeRoom({ height })}
             />
             <NumberField
               label="Max stack (m)"
@@ -310,11 +371,17 @@ export function StoragePlanner({
                         key={b.id}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${b.name}, ${b.packsInColumn} packs, ${formatNumber(b.w)} by ${formatNumber(b.d)} m`}
+                        aria-label={`${b.name}, ${b.packsInColumn} packs, ${formatNumber(b.w)} by ${formatNumber(b.d)} m. Press to slice in two.`}
                         className="cursor-grab touch-none active:cursor-grabbing"
                         onPointerDown={(e) => onBlockPointerDown(e, b)}
                         onPointerMove={onBlockPointerMove}
                         onPointerUp={onBlockPointerUp}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            sliceBlock(b.id)
+                          }
+                        }}
                       >
                         <rect
                           x={b.x * scale}
@@ -323,6 +390,9 @@ export function StoragePlanner({
                           height={b.d * scale}
                           rx={Math.min(3, side / 4)}
                           fill={color?.css}
+                          // Fade a stack while it sits on another or outside the
+                          // room; solid again once it is in an empty spot it fits.
+                          fillOpacity={over || lap ? 0.3 : 1}
                           stroke={
                             over ? "#dc2626" : lap ? "#d97706" : "#1f2a44"
                           }
@@ -336,6 +406,7 @@ export function StoragePlanner({
                             textAnchor="middle"
                             dominantBaseline="central"
                             fill={color?.text}
+                            fillOpacity={over || lap ? 0.3 : 1}
                             fontSize={clamp(side * 0.55, 7, 11)}
                             className="pointer-events-none font-semibold tabular-nums"
                           >
