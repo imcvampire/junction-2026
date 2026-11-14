@@ -75,9 +75,6 @@ function SearchesAndCandidates({
           <ul aria-label="Candidates" className="flex flex-col gap-1">
             {candidates.map((candidate, index) => (
               <li key={index} className="break-words">
-                <span className="font-mono text-xs">
-                  {candidate.product_id}
-                </span>{" "}
                 {candidate.name} ({candidate.source}):{" "}
                 {candidate.kept ? (
                   "kept"

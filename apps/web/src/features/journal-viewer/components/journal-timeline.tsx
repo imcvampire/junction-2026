@@ -10,12 +10,14 @@ import {
   ShieldCheckIcon,
   ShoppingCartIcon,
   type LucideIcon,
+  ClockIcon,
 } from "lucide-react"
+import { CalendarDate, DateTime, Field, JournalSection } from "../format"
+import type { TimelineEntry, ValioAimoJournal } from "../journal.types"
+import { purchasingJourney, type JourneyTime } from "../journey"
+import { Panel } from "./dashboard"
 
-import { DateTime, EmptyNote, JournalSection } from "../format"
-import type { TimelineEntry } from "../journal.types"
-
-const TYPE_ICON: Record<TimelineEntry["type"], LucideIcon> = {
+const ICONS: Record<TimelineEntry["type"], LucideIcon> = {
   authority: ShieldCheckIcon,
   search: SearchIcon,
   quote: ReceiptTextIcon,
@@ -28,58 +30,90 @@ const TYPE_ICON: Record<TimelineEntry["type"], LucideIcon> = {
   report: FileTextIcon,
 }
 
-function Refs({ refs }: { refs: TimelineEntry["refs"] }) {
-  if (!refs) return null
-  const parts = [
-    refs.quote_id ? `quote ${refs.quote_id}` : null,
-    refs.order_id ? `order ${refs.order_id}` : null,
-    refs.product_ids?.length ? `products ${refs.product_ids.join(", ")}` : null,
-  ].filter((part) => part !== null)
-  if (parts.length === 0) return null
+function DisplayTime({ time }: { time: JourneyTime }) {
   return (
-    <span className="font-mono text-xs break-all text-muted-foreground">
-      {parts.join(" · ")}
-    </span>
+    <p
+      className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+      title={time.note}
+    >
+      {time.value ? <DateTime value={time.value} /> : time.note}
+      {time.value && time.source !== "recorded" && (
+        <span className="rounded border bg-background px-1.5 py-0.5 text-[11px]">
+          {time.source === "previous"
+            ? "Estimated time"
+            : "Based on purchase request"}
+        </span>
+      )}
+    </p>
   )
 }
 
-export function JournalTimeline({ timeline }: { timeline: TimelineEntry[] }) {
-  const entries = [...timeline].sort((a, b) => a.seq - b.seq)
-
+export function JournalTimeline({
+  journal,
+  title = "Here's What Happened",
+}: {
+  journal: ValioAimoJournal
+  title?: string
+}) {
+  const steps = purchasingJourney(journal)
   return (
-    <JournalSection id="timeline" title="Timeline">
-      {entries.length === 0 ? (
-        <EmptyNote>None</EmptyNote>
-      ) : (
-        <ol aria-label="Timeline" className="flex flex-col gap-3">
-          {entries.map((entry, index) => {
-            const Icon = TYPE_ICON[entry.type] ?? FileTextIcon
+    <JournalSection id="journey" title={title}>
+      <Panel>
+        <ol aria-label="Purchase journey" className="journey-list">
+          {steps.map((step) => {
+            const Icon =
+              step.time.source === "pending" || step.time.source === "unknown"
+                ? ClockIcon
+                : ICONS[step.type]
             return (
-              <li key={`${entry.seq}-${index}`} className="flex gap-3">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Icon className="size-4" aria-hidden />
+              <li
+                key={step.key}
+                className="journey-step"
+                aria-label={step.title}
+              >
+                <span
+                  className={`journey-icon ${step.status === "complete" ? "journey-complete" : step.status === "attention" ? "journey-attention" : "journey-failed"}`}
+                >
+                  <Icon aria-hidden />
                 </span>
-                <div className="flex min-w-0 flex-col gap-0.5 text-sm">
-                  <span className="break-words">
-                    <span className="text-muted-foreground tabular-nums">
-                      {entry.seq}.
-                    </span>{" "}
-                    {entry.title}
-                  </span>
-                  <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                    <span>{entry.type}</span>
-                    {entry.tool ? (
-                      <code className="font-mono">{entry.tool}</code>
-                    ) : null}
-                    {entry.at ? <DateTime value={entry.at} /> : null}
-                  </span>
-                  <Refs refs={entry.refs} />
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-semibold">{step.title}</h4>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {step.explanation}
+                  </p>
+                  <DisplayTime time={step.time} />
+                  <details className="mt-2 text-sm">
+                    <summary className="cursor-pointer font-medium text-primary">
+                      View Details
+                    </summary>
+                    <dl className="mt-3 grid gap-4 rounded-xl border bg-background p-4 sm:grid-cols-2">
+                      <Field label="Event time">
+                        <DisplayTime time={step.time} />
+                      </Field>
+                      {step.facts.map(([label, value]) => (
+                        <Field key={label} label={label}>
+                          {/^\d{4}-\d{2}-\d{2}$/.test(value) ? (
+                            <CalendarDate value={value} />
+                          ) : /^\d{4}-\d{2}-\d{2}T/.test(value) ? (
+                            <DateTime value={value} />
+                          ) : (
+                            value
+                          )}
+                        </Field>
+                      ))}
+                    </dl>
+                  </details>
                 </div>
               </li>
             )
           })}
         </ol>
-      )}
+        <p className="mt-5 border-t pt-4 text-sm leading-relaxed text-muted-foreground">
+          Buyer approval and wholesaler confirmation are separate steps. Times
+          marked “Estimated time” are display estimates; original recorded times
+          remain unchanged.
+        </p>
+      </Panel>
     </JournalSection>
   )
 }

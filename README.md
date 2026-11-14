@@ -47,6 +47,13 @@ feature is one route file in `apps/web/src/routes/` plus a folder in `apps/web/s
   [`journal.schema.json`](skills/valio-aimo-purchasing/references/journal.schema.json) in the
   browser and never uploaded. A file that fails shows why, with the schema error paths.
 
+The customer Purchase Overview shows product comparisons, buyer decisions, safety checks,
+order details and a local PDF report. Technical records and detailed validation are separate
+at [`/developer/journal-viewer`](http://localhost:5173/developer/journal-viewer). Open the same
+local file there for debugging. This developer route has no authentication and is **not a
+security boundary**; it is omitted from customer navigation. See
+[`docs/purchase-overview.md`](docs/purchase-overview.md) for evidence limits and checks.
+
 ## Test the agent with Claude Code
 
 `mise run skill:sandbox` creates a directory outside the repo where a plain `claude` has the

@@ -3,6 +3,8 @@
  * Do not edit by hand. Regenerate with `pnpm gen:journal-types` in apps/web.
  */
 
+export type Id = string
+
 /**
  * The purchasing agent's own account of one task: what the buyer asked, what it searched and quoted, what the buyer chose, which orders exist and why. The server's audit trail stays the record of truth.
  */
@@ -371,6 +373,14 @@ export interface Option {
    */
   brand?: string | null
   /**
+   * Recorded product best-before date (YYYY-MM-DD), when supplied by product or batch data. Never use the quote expiration timestamp.
+   */
+  best_before_date?: string | null
+  /**
+   * Recorded product expiry/use-by date (YYYY-MM-DD), distinct from a best-before date and quote expiration.
+   */
+  expiry_date?: string | null
+  /**
    * Sales unit code, e.g. KI or ST.
    */
   sales_unit?: string | null
@@ -443,6 +453,18 @@ export interface Order {
    * The agent's client_reference.
    */
   client_reference?: string | null
+  /**
+   * Optional dated products/batches actually allocated to this order. Do not include unselected stock batches or infer dates from shelf-life durations.
+   */
+  product_dates?: {
+    product_id: Id
+    /**
+     * Allocated batch reference, when recorded.
+     */
+    batch_id?: string | null
+    best_before_date?: string | null
+    expiry_date?: string | null
+  }[]
   /**
    * The quote it was placed from.
    */

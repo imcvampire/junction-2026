@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as JournalViewerRouteImport } from './routes/journal-viewer'
+import { Route as DeveloperJournalViewerRouteImport } from './routes/developer.journal-viewer'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,40 @@ const JournalViewerRoute = JournalViewerRouteImport.update({
   path: '/journal-viewer',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeveloperJournalViewerRoute = DeveloperJournalViewerRouteImport.update({
+  id: '/developer/journal-viewer',
+  path: '/developer/journal-viewer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/developer/journal-viewer': typeof DeveloperJournalViewerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/developer/journal-viewer': typeof DeveloperJournalViewerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/developer/journal-viewer': typeof DeveloperJournalViewerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/journal-viewer'
+  fullPaths: '/' | '/journal-viewer' | '/developer/journal-viewer'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/journal-viewer'
-  id: '__root__' | '/' | '/journal-viewer'
+  to: '/' | '/journal-viewer' | '/developer/journal-viewer'
+  id: '__root__' | '/' | '/journal-viewer' | '/developer/journal-viewer'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   JournalViewerRoute: typeof JournalViewerRoute
+  DeveloperJournalViewerRoute: typeof DeveloperJournalViewerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +75,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JournalViewerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/developer/journal-viewer': {
+      id: '/developer/journal-viewer'
+      path: '/developer/journal-viewer'
+      fullPath: '/developer/journal-viewer'
+      preLoaderRoute: typeof DeveloperJournalViewerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   JournalViewerRoute: JournalViewerRoute,
+  DeveloperJournalViewerRoute: DeveloperJournalViewerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

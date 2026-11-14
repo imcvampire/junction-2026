@@ -44,7 +44,7 @@ test("uploading text that is not JSON shows the not-JSON alert", async () => {
   await user.upload(input, jsonFile("{", "broken.json"))
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This file is not valid JSON."
+    "This purchase record could not be opened."
   )
 })
 
@@ -58,7 +58,7 @@ test("uploading a second file replaces the first", async () => {
   await user.upload(input, jsonFile('{"schema": "other"}', "other.json"))
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This file is not a Valio Aimo journal."
+    "This file is not a purchase record."
   )
   expect(
     screen.queryByRole("heading", { name: example.title })

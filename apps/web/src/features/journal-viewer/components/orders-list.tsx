@@ -65,7 +65,7 @@ function OrderCard({ order }: { order: Order }) {
         </dl>
         <Field label="Why approval was needed">
           {order.approval_reasons.length === 0 ? (
-            "Placed within the agent's authority."
+            "No escalation reasons recorded."
           ) : (
             <ul className="list-disc pl-5">
               {order.approval_reasons.map((reason, index) => (
@@ -88,7 +88,7 @@ function OrderCard({ order }: { order: Order }) {
                 </Badge>
               </Field>
               <Field label="Reason">{decision.reason}</Field>
-              <Field label="Decided by">
+              <Field label="Recorded deciding agent">
                 <Text value={decision.decided_by} />
               </Field>
               <Field label="Confirmed via">

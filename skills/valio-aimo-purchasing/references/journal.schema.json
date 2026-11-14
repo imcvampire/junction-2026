@@ -347,6 +347,8 @@
         "product_id": { "$ref": "#/$defs/id", "description": "Catalog product id." },
         "name": { "type": "string", "description": "Product name." },
         "brand": { "type": ["string", "null"], "description": "Brand." },
+        "best_before_date": { "type": ["string", "null"], "format": "date", "description": "Recorded product best-before date (YYYY-MM-DD), when supplied by product or batch data. Never use the quote expiration timestamp." },
+        "expiry_date": { "type": ["string", "null"], "format": "date", "description": "Recorded product expiry/use-by date (YYYY-MM-DD), distinct from a best-before date and quote expiration." },
         "sales_unit": { "type": ["string", "null"], "description": "Sales unit code, e.g. KI or ST." },
         "content_per_sales_unit": { "type": ["string", "null"], "description": "What one sales unit holds." },
         "requested": { "type": ["string", "null"], "description": "What was asked for, e.g. '1000 L'." },
@@ -378,6 +380,20 @@
       "properties": {
         "order_id": { "$ref": "#/$defs/id", "description": "Server order_id." },
         "client_reference": { "type": ["string", "null"], "description": "The agent's client_reference." },
+        "product_dates": {
+          "type": "array",
+          "description": "Optional dated products/batches actually allocated to this order. Do not include unselected stock batches or infer dates from shelf-life durations.",
+          "items": {
+            "type": "object",
+            "required": ["product_id"],
+            "properties": {
+              "product_id": { "$ref": "#/$defs/id" },
+              "batch_id": { "type": ["string", "null"], "description": "Allocated batch reference, when recorded." },
+              "best_before_date": { "type": ["string", "null"], "format": "date" },
+              "expiry_date": { "type": ["string", "null"], "format": "date" }
+            }
+          }
+        },
         "quote_id": { "type": ["string", "null"], "description": "The quote it was placed from." },
         "status": {
           "enum": ["placed", "pending_approval", "approved", "rejected", "shipped", "cancelled"],

@@ -1,57 +1,30 @@
 import type { ReactNode } from "react"
-import { Link, type LinkProps } from "@tanstack/react-router"
-import { MoonIcon, SunIcon } from "lucide-react"
-
-import { useTheme } from "@/components/theme-provider"
-import { Button } from "@/components/ui/button"
-
-const NAV_ITEMS: { to: LinkProps["to"]; label: string }[] = [
-  { to: "/journal-viewer", label: "Journal viewer" },
-]
-
-function ThemeToggle() {
-  const { theme, setTheme } = useTheme()
-  const isDark =
-    theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches)
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-    >
-      {isDark ? <SunIcon /> : <MoonIcon />}
-    </Button>
-  )
-}
+import { Link } from "@tanstack/react-router"
+import { ShoppingBagIcon } from "lucide-react"
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-          <span className="flex items-center gap-2 font-heading font-semibold">
-            <img src="/favicon.svg" alt="" className="size-6" />
-            Valio
-          </span>
-          <nav aria-label="Features" className="flex min-w-0 flex-1 gap-1">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground data-[status=active]:bg-muted data-[status=active]:text-foreground"
-              >
-                {item.label}
-              </Link>
-            ))}
+      <header className="border-b bg-card">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+          <Link
+            to="/journal-viewer"
+            className="flex items-center gap-2 font-heading text-lg font-semibold text-primary"
+          >
+            <ShoppingBagIcon className="size-6" aria-hidden />
+            Valio Aimo
+          </Link>
+          <nav aria-label="Main navigation">
+            <Link
+              to="/journal-viewer"
+              className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-primary"
+            >
+              Purchase Overview
+            </Link>
           </nav>
-          <ThemeToggle />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 py-6">
+      <main className="mx-auto w-full max-w-7xl min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
         {children}
       </main>
     </div>

@@ -3,6 +3,7 @@ import { CircleAlertIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 import { MAX_JOURNAL_BYTES, type JournalLoadError } from "../parse-journal"
+import { redactSecrets, redactText } from "../evidence"
 
 function describeFound(found: unknown): string {
   if (found === undefined) return "nothing"
@@ -84,15 +85,33 @@ function ErrorBody({ error }: { error: JournalLoadError }) {
 export function LoadError({
   error,
   fileName,
+  technical = false,
 }: {
   error: JournalLoadError
   fileName: string
+  technical?: boolean
 }) {
   return (
     <Alert variant="destructive">
       <CircleAlertIcon />
-      <ErrorBody error={error} />
-      <AlertDescription className="text-xs">File: {fileName}</AlertDescription>
+      {technical || error.kind === "too_large" ? (
+        <ErrorBody error={redactSecrets(error)} />
+      ) : (
+        <>
+          <AlertTitle>
+            {error.kind === "not_a_journal"
+              ? "This file is not a purchase record."
+              : "This purchase record could not be opened."}
+          </AlertTitle>
+          <AlertDescription>
+            Some required information is missing or the file format is not
+            supported. Please request an updated purchase record.
+          </AlertDescription>
+        </>
+      )}
+      <AlertDescription className="text-xs">
+        File: {redactText(fileName)}
+      </AlertDescription>
     </Alert>
   )
 }
