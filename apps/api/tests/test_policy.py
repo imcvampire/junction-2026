@@ -45,26 +45,16 @@ def _order(total: float, *, substitute: bool = False, within: bool = True) -> Or
         (500.00, False, True, False),
         (500.01, False, True, True),
         (100.00, True, True, False),
-        (100.00, True, False, True),
-        (100.00, False, False, True),
+        (100.00, True, False, False),
+        (100.00, False, False, False),
+        (900.00, True, False, True),
     ],
 )
-def test_policy_table(total: float, substitute: bool, within: bool, needs_approval: bool) -> None:
+def test_only_spend_escalates(total: float, substitute: bool, within: bool, needs_approval: bool) -> None:
     reasons = ApprovalPolicy(500.0).evaluate(_order(total, substitute=substitute, within=within))
     assert bool(reasons) is needs_approval
 
 
-def test_reasons_are_human_readable() -> None:
+def test_reasons_name_only_the_spend_limit() -> None:
     reasons = ApprovalPolicy(500.0).evaluate(_order(900, substitute=True, within=False))
-    assert len(reasons) == 2
-    assert "spend limit" in reasons[0]
-    assert "LACTOSE_FREE" in reasons[1]
-
-
-def test_mandate_limit_overrides_global_and_is_named() -> None:
-    policy = ApprovalPolicy(500.0)
-    order = _order(300)
-
-    assert policy.evaluate(order) == []
-    reasons = policy.evaluate(order, policy.limit_for(200.0))
-    assert reasons == ["Total 300.00 EUR exceeds the 200.00 EUR spend limit (agent mandate)"]
+    assert reasons == ["Total 900.00 EUR exceeds the 500.00 EUR per-order spend limit"]

@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from api.agents.models import AgentPrincipal, Mandate
-from api.agents.registry import AgentRegistry
 from api.catalog.index import Catalog
 from api.orders.models import OrderStatus
 from api.orders.policy import ApprovalPolicy
@@ -25,10 +24,14 @@ from api.procurement.schemas import (
     QuoteView,
 )
 from api.procurement.service import ProcurementService
-from api.valio.client import ValioClient
+from api.valio.client import ValioClient, ValioError
 from tests.conftest import DELIVERY, FakeValio
 
 REQUEST = "I need 1,000 litres of lactose-free milk by Monday."
+
+
+def make_principal(name: str, customer: str, mandate: Mandate | None = None) -> AgentPrincipal:
+    return AgentPrincipal(agent_id=f"agt_{name}", name=name, customer=customer, mandate=mandate or Mandate())
 
 
 @dataclass
@@ -36,16 +39,15 @@ class Env:
     svc: ProcurementService
     orders: OrderService
     store: Store
-    registry: AgentRegistry
     fake: FakeValio
     clock: list[datetime]
     agent: AgentPrincipal
 
     def other_agent(self, **mandate: Any) -> AgentPrincipal:
-        return self.registry.create("other", "cust-2", Mandate(**mandate))[0]
+        return make_principal("other", "cust-2", Mandate(**mandate))
 
     def colleague(self, customer: str = "hotel-1", name: str = "ops") -> AgentPrincipal:
-        return self.registry.create(name, customer)[0]
+        return make_principal(name, customer)
 
     async def quote(
         self,
@@ -85,8 +87,7 @@ def run(
         store = Store(tmp_path / "p.sqlite3")
         http = httpx.AsyncClient(base_url="http://valio.test", transport=httpx.MockTransport(fake.handler))
         clock = [datetime.now(UTC)]
-        registry = AgentRegistry(store)
-        agent, _ = registry.create("hotel-agent", "hotel-1", mandate)
+        agent = make_principal("hotel-agent", "hotel-1", mandate)
         orders = OrderService(store)
         svc = ProcurementService(
             store,
@@ -99,7 +100,7 @@ def run(
             now=lambda: clock[0],
         )
         try:
-            await body(Env(svc, orders, store, registry, fake, clock, agent))
+            await body(Env(svc, orders, store, fake, clock, agent))
         finally:
             await http.aclose()
             store.close()
@@ -158,7 +159,7 @@ def test_above_limit_escalates_and_agent_reads_the_decision(
         q = await env.quote(items(("464119", 100)))
         order = await env.place(q, [("464119", 100)])
         assert order.status == OrderStatus.PENDING_APPROVAL
-        assert order.approval_reasons == ["Total 1540.00 EUR exceeds the 500.00 EUR spend limit (global threshold)"]
+        assert order.approval_reasons == ["Total 1540.00 EUR exceeds the 500.00 EUR per-order spend limit"]
         ops = env.colleague()
         await env.svc.decide(ops, order.order_id, approve=True, reason="gala dinner")
         seen = env.svc.get_order(env.agent, order.order_id)
@@ -169,28 +170,48 @@ def test_above_limit_escalates_and_agent_reads_the_decision(
     run(tmp_path, catalog, fake_valio, body)
 
 
-def test_mandate_limit_overrides_global(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+def test_spend_limit_applies_to_each_order_on_its_own(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
     async def body(env: Env) -> None:
-        assert env.svc.whoami(env.agent).spend_limit_eur == 200
-        q = await env.quote(items(("462775", 100)))
-        order = await env.place(q, [("462775", 100)])
-        assert order.status == OrderStatus.PENDING_APPROVAL
-        assert "(agent mandate)" in order.approval_reasons[0]
+        assert env.svc.whoami(env.agent).spend_limit_eur == 500
+        for ref in ("ref-1", "ref-2"):  # 257 EUR each, 514 EUR together: neither order is over the limit
+            q = await env.quote(items(("462775", 100)))
+            order = await env.place(q, [("462775", 100)], ref=ref)
+            assert order.status == OrderStatus.PLACED and order.approval_reasons == []
 
-    run(tmp_path, catalog, fake_valio, body, mandate=Mandate(spend_limit_eur=200))
+    run(tmp_path, catalog, fake_valio, body)
 
 
-def test_line_missing_a_frozen_requirement_escalates(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+def test_line_missing_a_buyer_requirement_is_placed_and_recorded(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
     async def body(env: Env) -> None:
         q = await env.quote(items(("462775", 10), ("464073", 10)), requirements=["brand:Valio", "SPARKLY"])
         assert q.requirements == ["brand:Valio"] and q.ignored_requirements == ["SPARKLY"]
         arla = next(o for o in q.options if o.product_id == "462775")
         assert not arla.meets_requirements and arla.missing_requirements == ["brand:Valio"]
+        assert not arla.breaks_mandate
         assert q.options[0].product_id == "464073"
 
         order = await env.place(q, [("462775", 10)])
+        assert order.status == OrderStatus.PLACED and order.approval_reasons == []
+        line = order.lines[0]
+        assert not line.within_preferences and line.missing_requirements == ["brand:Valio"]
+        audit = env.svc.audit(env.agent, order.order_id)
+        assert audit.entries[0].summary.endswith("buyer accepted missing brand:Valio on 462775")
+        assert "buyer accepted missing brand:Valio on 462775" in audit.text
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_over_limit_with_a_missed_buyer_requirement_escalates_for_spend_only(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        q = await env.quote(items(("462775", 300)), requirements=["brand:Valio"])
+        order = await env.place(q, [("462775", 300)])
         assert order.status == OrderStatus.PENDING_APPROVAL
-        assert "brand:Valio" in order.approval_reasons[0]
+        assert order.approval_reasons == ["Total 771.00 EUR exceeds the 500.00 EUR per-order spend limit"]
+        assert order.lines[0].missing_requirements == ["brand:Valio"]
 
     run(tmp_path, catalog, fake_valio, body)
 
@@ -200,11 +221,28 @@ def test_mandate_tags_apply_even_when_the_agent_omits_them(
 ) -> None:
     async def body(env: Env) -> None:
         q = await env.quote(items(("462775", 10)))
-        assert q.requirements == ["no:AM"]
-        order = await env.place(q, [("462775", 10)])
-        assert order.status == OrderStatus.PENDING_APPROVAL
+        assert q.requirements == ["no:AM"] and q.options[0].breaks_mandate
+        calls = len(env.fake.calls)
+        e = await refused("mandate_violation", env.place(q, [("462775", 10)]))
+        assert e.status == 422
+        assert e.details == {"lines": [{"product_id": "462775", "violations": ["no:AM"]}]}
+        assert len(env.fake.calls) == calls
+        assert env.svc.list_orders(env.agent).orders == []
+        assert env.svc.get_quote(env.agent, q.quote_id).order_id is None
 
     run(tmp_path, catalog, fake_valio, body, mandate=Mandate(banned_allergens=["AM"]))
+
+
+def test_mandate_tightened_after_the_quote_is_enforced_at_placement(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        q = await env.quote(items(("462775", 10)))
+        assert not q.options[0].breaks_mandate
+        stricter = env.agent.model_copy(update={"mandate": Mandate(required_tags=["brand:Valio"])})
+        await refused("mandate_violation", env.place(q, [("462775", 10)], agent=stricter))
+
+    run(tmp_path, catalog, fake_valio, body)
 
 
 def test_price_moved_refuses_without_creating_an_order(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
@@ -356,9 +394,8 @@ def test_unknown_mandate_tag_is_enforced_as_unmet(tmp_path: Path, catalog: Catal
     async def body(env: Env) -> None:
         q = await env.quote(items(("464073", 10)), requirements=["SPARKLY"])
         assert q.requirements == ["LACTOSE-FREE"] and q.ignored_requirements == ["SPARKLY"]
-        order = await env.place(q, [("464073", 10)])
-        assert order.status == OrderStatus.PENDING_APPROVAL
-        assert "LACTOSE-FREE" in order.approval_reasons[0]
+        e = await refused("mandate_violation", env.place(q, [("464073", 10)]))
+        assert e.details["lines"][0]["violations"] == ["LACTOSE-FREE"]
 
     run(tmp_path, catalog, fake_valio, body, mandate=Mandate(required_tags=["LACTOSE-FREE"]))
 
@@ -472,7 +509,7 @@ def test_the_buyer_decides_their_own_agents_escalation(tmp_path: Path, catalog: 
     run(tmp_path, catalog, fake_valio, body)
 
 
-def test_foreign_keys_cannot_see_or_decide_and_a_reason_is_required(
+def test_foreign_keys_cannot_see_or_decide_and_a_reason_is_required_to_reject(
     tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
 ) -> None:
     async def body(env: Env) -> None:
@@ -484,8 +521,11 @@ def test_foreign_keys_cannot_see_or_decide_and_a_reason_is_required(
         with pytest.raises(OrderError):
             env.svc.audit(rival, order.order_id)
         assert env.svc.list_pending_approvals(rival).orders == []
-        await refused("reason_required", env.svc.decide(env.agent, order.order_id, approve=True, reason="   "))
+        await refused("reason_required", env.svc.decide(env.agent, order.order_id, approve=False, reason="   "))
         assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PENDING_APPROVAL
+        approved = await env.svc.decide(env.agent, order.order_id, approve=True, reason="")
+        assert approved.status == OrderStatus.APPROVED and approved.decision is not None
+        assert approved.decision.reason == ""
 
     run(tmp_path, catalog, fake_valio, body)
 
@@ -502,5 +542,180 @@ def test_orders_stored_without_decided_by_still_load(tmp_path: Path, catalog: Ca
             c.execute("UPDATE orders SET data = ? WHERE id = ?", (json.dumps(data), order.order_id))
         seen = env.svc.get_order(env.agent, order.order_id)
         assert seen.decision is not None and seen.decision.decided_by is None
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_approval_with_unchanged_price_and_stock_requotes_once(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        calls = len(env.fake.calls)
+        approved = await env.svc.decide(env.agent, order.order_id, approve=True, reason="gala")
+        assert approved.status == OrderStatus.APPROVED and approved.total == order.total
+        assert len(env.fake.calls) == calls + 2  # one price and one availability call
+        entry = env.svc.audit(env.agent, order.order_id).entries[-1]
+        assert entry.action == "approved" and entry.details["confirmed_via"] == "rest"
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_price_change_at_approval_needs_the_new_total_confirmed(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        env.fake.prices["464119"] = 16.0
+        e = await refused("price_changed", env.svc.decide(env.agent, order.order_id, approve=True, reason="gala"))
+        assert e.status == 409
+        assert e.details == {
+            "changes": [{"product_id": "464119", "problem": "price_changed", "was": 15.4, "now": 16.0}],
+            "old_total": 1540.0,
+            "new_total": 1600.0,
+        }
+        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PENDING_APPROVAL
+
+        stale = env.svc.decide(env.agent, order.order_id, approve=True, reason="gala", expected_total=1540.0)
+        await refused("price_changed", stale)
+
+        approved = await env.svc.decide(env.agent, order.order_id, approve=True, reason="gala", expected_total=1600)
+        assert approved.status == OrderStatus.APPROVED and approved.total == 1600.0
+        assert approved.lines[0].unit_price == 16.0 and approved.lines[0].line_total == 1600.0
+        audit = env.svc.audit(env.agent, order.order_id)
+        assert [x.action for x in audit.entries] == ["escalated", "repriced", "approved"]
+        assert audit.entries[1].details["old_total"] == 1540.0 and audit.entries[1].details["new_total"] == 1600.0
+        assert "total 1540.00 -> 1600.00 EUR (464119 15.40 -> 16.00)" in audit.text
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_unchanged_price_with_a_stale_expected_total_is_refused(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        call = env.svc.decide(env.agent, order.order_id, approve=True, reason="gala", expected_total=999)
+        e = await refused("price_changed", call)
+        assert e.details["changes"] == [] and e.details["new_total"] == 1540.0
+        ok = await env.svc.decide(env.agent, order.order_id, approve=True, reason="gala", expected_total=1540.004)
+        assert ok.status == OrderStatus.APPROVED
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_stock_short_at_approval_closes_the_order_for_a_rerun(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        q = await env.svc.quote(
+            env.agent,
+            QuoteRequest(
+                items=items(("464119", 100)),
+                delivery_date=DELIVERY,
+                requirements=["LACTOSE_FREE"],
+                request_text=REQUEST,
+                purpose="coffee",
+            ),
+        )
+        order = await env.place(q, [("464119", 100)])
+        env.fake.stock["464119"] = 20
+        env.fake.prices["464119"] = 16.0  # a price move as well: stock wins
+        ops = env.colleague()
+        e = await refused("stock_changed", env.svc.decide(ops, order.order_id, approve=True, reason="gala"))
+        assert e.status == 409
+        assert {c["problem"] for c in e.details["changes"]} == {"price_changed", "not_available_in_time"}
+        assert e.details["rerun"] == {
+            "request_text": REQUEST,
+            "requirements": ["LACTOSE_FREE"],
+            "purpose": "coffee",
+            "delivery_date": DELIVERY.isoformat(),
+            "lines": [{"product_id": "464119", "quantity": 100, "substitute_for": None}],
+        }
+        closed = env.svc.get_order(env.agent, order.order_id)
+        assert closed.status == OrderStatus.REJECTED and e.details["order"]["status"] == "rejected"
+        assert closed.decision is not None and closed.decision.decided_by is None
+        assert "464119" in closed.decision.reason
+        last = env.svc.audit(env.agent, order.order_id).entries[-1]
+        assert last.actor == "system" and last.action == "rejected" and last.agent_id is None
+        await refused("invalid_state", env.svc.decide(ops, order.order_id, approve=True, reason="again"))
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_rejecting_never_calls_upstream(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        env.fake.stock["464119"] = 1
+        calls = len(env.fake.calls)
+        rejected = await env.svc.decide(env.agent, order.order_id, approve=False, reason="no")
+        assert rejected.status == OrderStatus.REJECTED and len(env.fake.calls) == calls
+        assert rejected.decision is not None and rejected.decision.decided_by is not None
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_upstream_failure_at_approval_leaves_the_order_pending(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        env.fake.status = 503
+        with pytest.raises(ValioError):
+            await env.svc.decide(env.agent, order.order_id, approve=True, reason="gala")
+        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PENDING_APPROVAL
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_a_decision_landing_during_the_recheck_wins(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+    race: list[tuple[Store, str]] = []
+    original = fake_valio.handler
+
+    def racing(request: httpx.Request) -> httpx.Response:
+        # Another process rejects the order while this approval waits on upstream.
+        if race:
+            store, order_id = race.pop()
+            stored = store.get_order(order_id)
+            assert stored is not None
+            store.save_order(stored.model_copy(update={"status": OrderStatus.REJECTED}), [])
+        return original(request)
+
+    fake_valio.handler = racing  # type: ignore[method-assign]
+
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        race.append((env.store, order.order_id))
+        await refused("invalid_state", env.svc.decide(env.agent, order.order_id, approve=True, reason="late"))
+        assert not race and env.svc.get_order(env.agent, order.order_id).status == OrderStatus.REJECTED
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_purpose_is_frozen_on_the_quote_and_carried_to_the_order_and_audit(
+    tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(env: Env) -> None:
+        req = QuoteRequest(
+            items=items(("464073", 10)), delivery_date=DELIVERY, request_text=REQUEST, purpose=" coffee "
+        )
+        q = await env.svc.quote(env.agent, req)
+        assert q.purpose == "coffee" and env.svc.get_quote(env.agent, q.quote_id).purpose == "coffee"
+        order = await env.place(q, [("464073", 10)])
+        assert order.purpose == "coffee"
+        audit = env.svc.audit(env.agent, order.order_id)
+        assert audit.entries[0].details["purpose"] == "coffee"
+        assert "request: I need 1,000 litres of lactose-free milk by Monday.\n    purpose: coffee" in audit.text
+
+        blank = QuoteRequest(items=items(("464073", 1)), delivery_date=DELIVERY, purpose="   ")
+        assert blank.purpose is None
+
+        stored = env.store.get_order(order.order_id)
+        assert stored is not None
+        data = stored.model_dump(mode="json")
+        del data["purpose"]
+        with env.store.transaction() as c:
+            c.execute("UPDATE orders SET data = ? WHERE id = ?", (json.dumps(data), order.order_id))
+        assert env.svc.get_order(env.agent, order.order_id).purpose is None
 
     run(tmp_path, catalog, fake_valio, body)

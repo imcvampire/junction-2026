@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: Approval only for the spend limit; mandate violations refused
-status: pending
+status: completed
 depends_on: []
 ---
 

@@ -25,7 +25,7 @@ flowchart TB
     J -- No --> L{"later delivery date possible"}
     L -- Yes --> F
     L -- No --> M(["tell buyer it cannot be fulfilled and why"])
-    K --> S{"substitute meets the agent's mandate: required tags, banned allergens"}
+    K --> S{"substitute meets the company mandate: required tags, banned allergens"}
     S -- Yes --> P
     S -- No --> L
     F --> P
@@ -34,7 +34,7 @@ flowchart TB
     IN -- Yes --> E{"order total within the agent's purchase limit"}
     E -- Yes --> R{"price and stock unchanged at placement"}
     E -- No --> HL["hold as pending approval: the agent does not place it, and shows the human the total, the limit and why"]
-    HL --> H{"prompt the buyer: approve or reject, with a reason"}
+    HL --> H{"prompt the buyer: approve, or reject with a reason"}
     H -- Yes --> RA{"price and stock unchanged at approval"}
     RA -- Yes --> G
     RA -- "only price changed" --> H
@@ -63,10 +63,18 @@ fallback for a host that has no such tool. The skill's "Asking the buyer" sectio
 Approval (`H`) is only for orders whose total is over the agent's purchase limit. A substitute or a
 later date is the buyer's choice in the offer prompt (`IN`), not an approval. A substitute that misses
 one of the buyer's own preferences can be ordered once the buyer picks it, and the order records the
-miss. A substitute that breaks the agent's mandate (required tags or banned allergens set by its
-owners) is never offered, and the server refuses it.
+miss. A substitute that breaks the company mandate (required tags or banned allergens set in
+`API_REQUIRED_TAGS` and `API_BANNED_ALLERGENS`) is never offered, and the server refuses it.
 
 Approval re-checks price and stock (`RA`). If only the price moved, the buyer is asked again with the
 new total. If stock no longer covers the order, the server closes it, the agent tells the buyer what
 ran out, and the flow re-runs from the availability check (`B`) with the same request, requirements,
 purpose and date, so the buyer is not asked again for answers they already gave.
+
+On MCP the approval prompt (`H`) is the server's own elicitation form, shown by the host: the agent
+calls `approve_order` right after the order comes back pending (or `reject_order` when the buyer
+says reject), the server runs `RA` for an approval, and the human picks approve or reject and
+writes the reason in the form (optional for an approval). A price change is shown in that same form, so
+`RA -- "only price changed" --> H` is one prompt, not two. Declining or dismissing the form leaves
+the order pending (`decision_cancelled`); only a reject chosen in the form takes the `H -- No` path. Over
+REST the agent asks with its own dialog and confirms a changed price with `expected_total`.

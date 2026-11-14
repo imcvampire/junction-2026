@@ -7,46 +7,80 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
+import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mcp import ClientSession
+from mcp.client.session import ElicitationFnT
 from mcp.client.streamable_http import streamable_http_client
-from mcp.types import CallToolResult, TextContent
+from mcp.shared.context import RequestContext
+from mcp.types import CallToolResult, ElicitRequestFormParams, ElicitRequestParams, ElicitResult, ErrorData, TextContent
 
+from api.agents.models import SHARED_AGENT_ID
 from api.catalog.index import Catalog
 from api.config import Settings
 from api.main import create_app
-from api.mcp.server import MCP_AGENT_ID, TOOL_NAMES
-from api.services import Services
-from tests.conftest import DELIVERY, FakeValio, bearer
+from api.mcp.server import TOOL_NAMES
+from tests.conftest import DELIVERY, FakeValio
 
 SKILL_DIR = Path(__file__).resolve().parents[3] / "skills" / "valio-aimo-purchasing"
 Body = Callable[[ClientSession, FastAPI], Awaitable[None]]
 
 
+class Human:
+    """The host's approval form: records each elicitation and answers with the queued replies."""
+
+    def __init__(self) -> None:
+        self.asked: list[ElicitRequestFormParams] = []
+        self.replies: list[ElicitResult] = []
+
+    def will(self, action: str = "accept", **content: str) -> None:
+        self.replies.append(ElicitResult(action=action, content=content or None))  # type: ignore[arg-type]
+
+    async def __call__(
+        self, context: RequestContext[ClientSession, Any], params: ElicitRequestParams
+    ) -> ElicitResult | ErrorData:
+        assert isinstance(params, ElicitRequestFormParams)
+        self.asked.append(params)
+        return self.replies.pop(0)
+
+
 @asynccontextmanager
-async def mcp_session(app: FastAPI) -> AsyncGenerator[ClientSession]:
+async def mcp_session(app: FastAPI, elicitation: ElicitationFnT | None = None) -> AsyncGenerator[ClientSession]:
     async with (
-        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as http,
-        streamable_http_client("http://testserver/mcp", http_client=http) as (read, write, _),
-        ClientSession(read, write) as session,
+        streamable_http_client(app.state.mcp_url) as (read, write, _),
+        ClientSession(read, write, elicitation_callback=elicitation) as session,
     ):
         await session.initialize()
         yield session
 
 
-def run_mcp(settings: Settings, catalog: Catalog, fake: FakeValio, body: Body) -> None:
+@asynccontextmanager
+async def serving(app: FastAPI) -> AsyncGenerator[None]:
+    """A real HTTP server: httpx's ASGI transport buffers whole responses, so a server request sent
+    mid-call (elicitation) would never reach the client."""
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        if task.done():
+            task.result()
+        await asyncio.sleep(0.01)
+    app.state.mcp_url = f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}/mcp"
+    try:
+        yield
+    finally:
+        server.should_exit = True
+        await task
+
+
+def run_mcp(settings: Settings, catalog: Catalog, fake: FakeValio, body: Body, human: Human | None = None) -> None:
     app = create_app(settings, catalog=catalog, valio_transport=httpx.MockTransport(fake.handler))
 
     async def main() -> None:
-        async with app.router.lifespan_context(app), mcp_session(app) as session:
+        async with serving(app), mcp_session(app, human) as session:
             await body(session, app)
 
-    asyncio.run(main())
-
-
-def rest_key(app: FastAPI, customer: str) -> str:
-    return cast(Services, app.state.services).agents.create("ops", customer)[1]
+    asyncio.run(asyncio.wait_for(main(), timeout=30))
 
 
 def structured(result: CallToolResult) -> dict[str, Any]:
@@ -107,6 +141,9 @@ def test_tools_are_listed_with_schemas_and_annotations(
 def test_reference_request_escalates_then_approval_is_visible(
     settings: Settings, catalog: Catalog, fake_valio: FakeValio
 ) -> None:
+    human = Human()
+    human.will(decision="approve", reason="gala dinner")
+
     async def body(session: ClientSession, app: FastAPI) -> None:
         me = structured(await session.call_tool("whoami", {}))
         assert me["spend_limit_eur"] == 500
@@ -130,59 +167,68 @@ def test_reference_request_escalates_then_approval_is_visible(
         assert [o["order_id"] for o in queue["orders"]] == [order["order_id"]]
         decided = await session.call_tool("approve_order", {"order_id": order["order_id"], "reason": "gala"})
         assert structured(decided)["decision"]["decided_by"]["name"] == me["name"]
+        assert structured(decided)["decision"]["reason"] == "gala dinner"
+        form = human.asked[0]
+        assert order["order_id"] in form.message and "1540.00 EUR" in form.message and "spend limit" in form.message
+        props = form.requestedSchema["properties"]
+        assert props["decision"]["default"] == "approve" and props["decision"]["enum"] == ["approve", "reject"]
+        assert props["reason"]["default"] == "gala"
         assert f"approved by {me['name']}" in cast(TextContent, decided.content[0]).text
         seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
         assert seen["status"] == "approved" and seen["decision"]["decided_by"]["agent_id"] == me["agent_id"]
         audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
         assert "options considered" in audit["text"] and f"Approved by {me['name']} (agt_" in audit["text"]
+        assert "confirmed via: mcp_elicitation" in audit["text"]
         listed = structured(await session.call_tool("list_orders", {"status": "approved"}))
         assert [o["order_id"] for o in listed["orders"]] == [order["order_id"]]
 
-    run_mcp(settings, catalog, fake_valio, body)
+    run_mcp(settings, catalog, fake_valio, body, human)
 
 
-def test_every_mcp_client_is_the_same_shared_agent(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+def test_every_mcp_and_rest_client_is_the_same_shared_agent(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
     async def body(session: ClientSession, app: FastAPI) -> None:
         me = structured(await session.call_tool("whoami", {}))
-        assert me["agent_id"] == MCP_AGENT_ID and me["customer"] == settings.valio_customer
+        assert me["agent_id"] == SHARED_AGENT_ID and me["customer"] == settings.valio_customer
         order = structured(await place_best(session, await quote_milk(session)))
         assert order["status"] == "pending_approval"
-        async with mcp_session(app) as other:
-            assert structured(await other.call_tool("whoami", {}))["agent_id"] == MCP_AGENT_ID
+        human = Human()
+        human.will(decision="reject", reason="no")
+        async with mcp_session(app, human) as other:
+            assert structured(await other.call_tool("whoami", {}))["agent_id"] == SHARED_AGENT_ID
             tools = {t.name: t for t in (await other.list_tools()).tools}
             for name in ("approve_order", "reject_order"):
                 hints = tools[name].annotations
                 assert hints and hints.destructiveHint and not hints.readOnlyHint
-                assert {"order_id", "reason"} <= set(tools[name].inputSchema["required"])
+                assert tools[name].inputSchema["required"] == ["order_id"]
             mine = structured(await other.call_tool("list_orders", {}))
             assert [o["order_id"] for o in mine["orders"]] == [order["order_id"]]
-            reject = {"order_id": order["order_id"], "reason": "no"}
-            rejected = structured(await other.call_tool("reject_order", reject))
-            assert rejected["status"] == "rejected" and rejected["decision"]["decided_by"]["agent_id"] == MCP_AGENT_ID
+            rejected = structured(await other.call_tool("reject_order", {"order_id": order["order_id"]}))
+            assert rejected["status"] == "rejected"
+            assert rejected["decision"]["decided_by"]["agent_id"] == SHARED_AGENT_ID
 
         http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
         async with http:
             path = f"/api/agent/v1/orders/{order['order_id']}"
-            same = await http.get(path, headers=bearer(rest_key(app, settings.valio_customer)))
+            same = await http.get(path)
             assert same.status_code == 200 and same.json()["status"] == "rejected"
-            rival = await http.get(path, headers=bearer(rest_key(app, "hotel-2")))
-            assert rival.status_code == 404
 
     run_mcp(settings, catalog, fake_valio, body)
 
 
-def test_shared_agent_survives_restart_and_follows_the_configured_customer(
+def test_shared_agent_follows_the_configured_customer_and_mandate(
     settings: Settings, catalog: Catalog, fake_valio: FakeValio
 ) -> None:
-    for customer in ("hotel-1", "hotel-2"):
-        app = create_app(
-            settings.model_copy(update={"valio_customer": customer}),
-            catalog=catalog,
-            valio_transport=httpx.MockTransport(fake_valio.handler),
-        )
-        with TestClient(app) as c:
-            agents = cast(Services, cast(FastAPI, c.app).state.services).agents.list()
-            assert [(a.agent_id, a.customer) for a in agents] == [(MCP_AGENT_ID, customer)]
+    cfg = settings.model_copy(
+        update={"valio_customer": "hotel-2", "required_tags": [" LACTOSE_FREE "], "banned_allergens": ["am"]}
+    )
+    app = create_app(cfg, catalog=catalog, valio_transport=httpx.MockTransport(fake_valio.handler))
+    with TestClient(app) as c:
+        me = c.get("/api/agent/v1/me").json()
+    assert (me["agent_id"], me["customer"]) == (SHARED_AGENT_ID, "hotel-2")
+    assert me["required_tags"] == ["LACTOSE_FREE"] and me["banned_allergens"] == ["AM"]
+    assert me["spend_limit_eur"] == settings.approval_spend_threshold_eur
 
 
 def test_order_within_authority_is_placed(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
@@ -219,8 +265,6 @@ def test_mcp_needs_no_key_but_rejects_foreign_origins(
     with TestClient(app) as c:
         assert c.post("/mcp", json=init, headers=headers).status_code != 401
         assert c.post("/mcp", json=init, headers={**headers, "Origin": "https://evil.example"}).status_code == 403
-        keyless = c.get("/api/agent/v1/me", headers=bearer(f"keyless:{MCP_AGENT_ID}"))
-        assert keyless.status_code == 401
 
 
 def test_skill_mentions_only_real_tools() -> None:
@@ -242,3 +286,150 @@ def test_skill_mentions_only_real_tools() -> None:
         "agree_order",
     }
     assert mentioned == set(TOOL_NAMES)
+
+
+async def pending(session: ClientSession) -> dict[str, Any]:
+    order = structured(await place_best(session, await quote_milk(session)))
+    assert order["status"] == "pending_approval"
+    return order
+
+
+def test_a_client_without_elicitation_cannot_decide(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        for tool in ("approve_order", "reject_order"):
+            res = await session.call_tool(tool, {"order_id": order["order_id"], "reason": "ok"})
+            assert error_body(res)["code"] == "elicitation_required"
+        seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
+        assert seen["status"] == "pending_approval"
+
+    run_mcp(settings, catalog, fake_valio, body)
+
+
+def test_the_human_decides_in_the_form_not_the_tool_call(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will(decision="reject", reason="Too much milk for one week")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        calls = len(fake_valio.calls)
+        res = structured(await session.call_tool("approve_order", {"order_id": order["order_id"], "reason": "yes"}))
+        assert res["status"] == "rejected" and res["decision"]["reason"] == "Too much milk for one week"
+        assert len(fake_valio.calls) == calls + 2  # only the re-check before the form; a rejection is not re-checked
+        audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
+        assert audit["entries"][-1]["details"]["confirmed_via"] == "mcp_elicitation"
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_declining_or_cancelling_the_form_decides_nothing(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will("decline")
+    human.will("cancel")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        for tool, action in (("approve_order", "decline"), ("reject_order", "cancel")):
+            err = error_body(await session.call_tool(tool, {"order_id": order["order_id"]}))
+            assert err["code"] == "decision_cancelled" and err["details"] == {"action": action}
+        assert "Approve order" in human.asked[0].message and "Reject order" in human.asked[1].message
+        assert human.asked[1].requestedSchema["properties"]["decision"]["default"] == "reject"
+        seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
+        assert seen["status"] == "pending_approval"
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_the_human_may_approve_without_a_reason(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+    human = Human()
+    human.will(decision="approve")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        res = structured(await session.call_tool("approve_order", {"order_id": order["order_id"]}))
+        assert res["status"] == "approved" and res["decision"]["reason"] == ""
+        assert "reason" not in human.asked[0].requestedSchema.get("required", [])
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_a_price_change_is_confirmed_in_the_same_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will(decision="approve", reason="Still fine at the new price")
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        fake_valio.prices["464119"] = 16.0
+        res = structured(await session.call_tool("approve_order", {"order_id": order["order_id"]}))
+        assert res["status"] == "approved" and res["total"] == 1600.0
+        message = human.asked[0].message
+        assert "PRICE CHANGED" in message and "464119 15.40 -> 16.00" in message and "1600.00 EUR" in message
+        assert human.asked[0].requestedSchema["properties"]["reason"]["default"] == ""
+        audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
+        assert [e["action"] for e in audit["entries"]] == ["escalated", "repriced", "approved"]
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_stock_change_closes_the_order_without_a_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        order = await pending(session)
+        fake_valio.stock["464119"] = 5
+        err = error_body(await session.call_tool("approve_order", {"order_id": order["order_id"]}))
+        assert err["code"] == "stock_changed" and err["details"]["rerun"]["delivery_date"] == DELIVERY.isoformat()
+        assert human.asked == []
+        seen = structured(await session.call_tool("get_order", {"order_id": order["order_id"]}))
+        assert seen["status"] == "rejected" and seen["decision"]["decided_by"] is None
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_decided_and_unknown_orders_are_answered_without_a_form(
+    settings: Settings, catalog: Catalog, fake_valio: FakeValio
+) -> None:
+    human = Human()
+    human.will(decision="approve", reason="gala")
+
+    async def body(session: ClientSession, app: FastAPI) -> None:
+        order = await pending(session)
+        first = structured(await session.call_tool("approve_order", {"order_id": order["order_id"]}))
+        again = structured(await session.call_tool("approve_order", {"order_id": order["order_id"]}))
+        assert again == first and len(human.asked) == 1
+        late = error_body(await session.call_tool("reject_order", {"order_id": order["order_id"], "reason": "no"}))
+        assert late["code"] == "invalid_state"
+
+        err = error_body(await session.call_tool("approve_order", {"order_id": "ord_unknown"}))
+        assert err["code"] == "order_not_found" and len(human.asked) == 1
+
+    run_mcp(settings, catalog, fake_valio, body, human)
+
+
+def test_quote_carries_the_buyers_purpose(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> None:
+    async def body(session: ClientSession, _: FastAPI) -> None:
+        quote = structured(
+            await session.call_tool(
+                "quote",
+                {
+                    "items": [{"product_id": "464073", "quantity": 10}],
+                    "delivery_date": DELIVERY.isoformat(),
+                    "purpose": "baking",
+                },
+            )
+        )
+        assert quote["purpose"] == "baking"
+        order = structured(await place_best(session, quote))
+        assert order["purpose"] == "baking"
+
+    run_mcp(settings, catalog, fake_valio, body)

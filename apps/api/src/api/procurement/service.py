@@ -1,9 +1,9 @@
 """Agent procurement: search -> quote (stored, expiring) -> place_order at the quoted price.
 
 Every rule that matters is enforced here, whatever the transport: quote ownership and expiry, fixed
-prices (re-quoted and refused on any change), lot sizes, the agent's spend limit and the
-requirements frozen on the quote. So is authorization: every key of a customer sees that customer's
-orders, and its human may approve or reject the pending ones through it.
+prices (re-quoted and refused on any change), lot sizes, the per-order spend limit (the only reason an
+order waits for a human) and the company mandate (a line that breaks it is refused). So is scoping:
+an agent sees its customer's orders, and the human may approve or reject the pending ones through it.
 """
 
 import asyncio
@@ -13,15 +13,16 @@ import time
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from api.agents.models import AgentPrincipal
 from api.catalog.index import Catalog, Product
-from api.orders.models import AuditEntry, DecidedBy, Order, OrderLine, OrderStatus, utcnow
+from api.orders.models import AuditEntry, ConfirmedVia, DecidedBy, Order, OrderLine, OrderStatus, utcnow
 from api.orders.policy import ApprovalPolicy
-from api.orders.service import OrderError, OrderService, quote_changes, render_audit_text
+from api.orders.service import OrderError, OrderService, quote_changes, render_audit_text, repriced_total
 from api.orders.store import QuoteAlreadyUsedError, ReferenceTakenError, Store
 from api.procurement.schemas import (
     MAX_LINE_QUANTITY,
@@ -54,6 +55,16 @@ HELSINKI = ZoneInfo("Europe/Helsinki")
 _RATE_WINDOW_S = 60.0
 
 
+@dataclass(frozen=True, slots=True)
+class Recheck:
+    """A pending order against a fresh upstream quote: the price changes a human must confirm, if any."""
+
+    order: Order
+    changes: list[dict[str, Any]]
+    prices: dict[str, float]
+    new_total: float
+
+
 class ProcurementService:
     def __init__(
         self,
@@ -79,13 +90,11 @@ class ProcurementService:
         self._agent_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def whoami(self, agent: AgentPrincipal) -> Principal:
-        limit = self._policy.limit_for(agent.mandate.spend_limit_eur)
         return Principal(
             agent_id=agent.agent_id,
             name=agent.name,
             customer=agent.customer,
-            spend_limit_eur=limit.amount,
-            spend_limit_source=limit.source,
+            spend_limit_eur=self._policy.spend_threshold,
             required_tags=agent.mandate.required_tags,
             banned_allergens=agent.mandate.banned_allergens,
             quote_ttl_s=self._quote_ttl.total_seconds(),
@@ -116,14 +125,14 @@ class ProcurementService:
             raise OrderError("unknown_product", "None of the products exist", status=422, details={"unknown": unknown})
         self._spend_quote_budget(agent.agent_id)
 
-        # Mandate tags are never dropped: one the catalog cannot check counts as unmet, so orders escalate.
+        # Mandate tags are never dropped: one the catalog cannot check counts as unmet, so placement refuses it.
         mandate = agent.mandate.requirement_tags()
         requested = list(dict.fromkeys([*req.requirements, *mandate]))
         requirements = [t for t in requested if t in mandate or self._catalog.is_known_tag(t)]
         ignored = [t for t in requested if t not in requirements]
 
         quotes = await self._valio.quote([p.id for _, p in known], req.delivery_date, customer=agent.customer)
-        options = [self._option(item, p, quotes[p.id], req, requirements) for item, p in known]
+        options = [self._option(item, p, quotes[p.id], req, requirements, mandate) for item, p in known]
         options.sort(key=_rank_key)
         for rank, o in enumerate(options, 1):
             o.rank = rank
@@ -141,6 +150,7 @@ class ProcurementService:
             delivery_date=req.delivery_date,
             currency=next(iter(quotes.values())).currency,
             request_text=req.request_text,
+            purpose=req.purpose,
             requirements=requirements,
             ignored_requirements=ignored,
             options=options,
@@ -201,14 +211,20 @@ class ProcurementService:
                 )
             self._require_live(quote)  # the re-quote can take seconds; never store an order past expiry
 
-            limit = self._policy.limit_for(agent.mandate.spend_limit_eur)
-            order.approval_reasons = self._policy.evaluate(order, limit)
+            order.approval_reasons = self._policy.evaluate(order)
             order.status = OrderStatus.PENDING_APPROVAL if order.approval_reasons else OrderStatus.PLACED
             summary = (
                 "Needs human approval: " + "; ".join(order.approval_reasons)
                 if order.approval_reasons
                 else f"Placed within the agent's authority at {order.total:.2f} {order.currency}"
             )
+            accepted = [
+                f"missing {', '.join(li.missing_requirements)} on {li.product_id}"
+                for li in order.lines
+                if li.missing_requirements
+            ]
+            if accepted:
+                summary += "; buyer accepted " + "; ".join(accepted)
             entry = AuditEntry(
                 order_id=order.id,
                 at=order.created_at,
@@ -219,13 +235,14 @@ class ProcurementService:
                 details={
                     "agent_name": agent.name,
                     "request": quote.request_text,
+                    "purpose": quote.purpose,
                     "requirements": quote.requirements,
                     "quote_id": quote.quote_id,
                     "options_considered": [_option_summary(o) for o in quote.options],
                     "choice": [li.model_dump(mode="json") for li in order.lines],
                     "reason": req.reason,
                     "reasons": order.approval_reasons,
-                    "spend_limit": {"amount": limit.amount, "source": limit.source},
+                    "spend_limit": self._policy.spend_threshold,
                 },
             )
             try:
@@ -279,16 +296,76 @@ class ProcurementService:
         )
         return OrderList(orders=[OrderView.of(o) for o in orders])
 
-    async def decide(self, agent: AgentPrincipal, order_id: str, *, approve: bool, reason: str) -> OrderView:
+    async def recheck_for_approval(self, agent: AgentPrincipal, order_id: str) -> Recheck:
+        """Re-quote a pending order before a human approves it.
+
+        Returns the price changes the human must confirm (none when unchanged). If stock, a sales block
+        or a missing price means the order can no longer be filled, the order is closed and
+        `stock_changed` is raised with what the agent needs to re-run the flow from the availability check.
+        """
         order = self._visible_order(agent, order_id)
+        if order.status != OrderStatus.PENDING_APPROVAL:
+            raise OrderError(
+                "invalid_state",
+                f"Order {order.id} is {order.status.value}; only pending_approval orders can be decided",
+            )
+        codes = [li.product_id for li in order.lines]
+        self._valio.invalidate(codes, order.delivery_date, customer=order.customer)
+        fresh = await self._valio.quote(codes, order.delivery_date, customer=order.customer)
+        changes = quote_changes(order, fresh)
+        if any(c["problem"] != "price_changed" for c in changes):
+            closed = await self._orders.close_stale(order.id, changes)
+            raise OrderError(
+                "stock_changed",
+                f"Order {order.id} can no longer be delivered as ordered and was closed; tell the buyer what ran "
+                "out and quote again from the availability check with details.rerun",
+                details={
+                    "changes": changes,
+                    "order": OrderView.of(closed).model_dump(mode="json"),
+                    "rerun": self._rerun(order),
+                },
+            )
+        prices = {c["product_id"]: float(c["now"]) for c in changes}
+        return Recheck(order=order, changes=changes, prices=prices, new_total=repriced_total(order, prices))
+
+    async def decide(
+        self,
+        agent: AgentPrincipal,
+        order_id: str,
+        *,
+        approve: bool,
+        reason: str,
+        expected_total: float | None = None,
+        confirmed_via: ConfirmedVia = "rest",
+    ) -> OrderView:
+        order = self._visible_order(agent, order_id)
+        decided_by = DecidedBy(agent_id=agent.agent_id, name=agent.name)
         reason = reason.strip()
-        if not reason:
-            raise OrderError("reason_required", "Give the reason for the decision", status=422)
+        if order.status != OrderStatus.PENDING_APPROVAL:
+            # Nothing left to decide: the same decision again is answered as before, anything else is invalid_state.
+            decided = await self._orders.decide(order.id, approve=approve, reason=reason, decided_by=decided_by)
+            return OrderView.of(decided)
+        if not reason and not approve:
+            raise OrderError("reason_required", "Give the reason for rejecting the order", status=422)
+        prices: dict[str, float] | None = None
+        if approve:
+            check = await self.recheck_for_approval(agent, order.id)
+            confirmed = expected_total is not None and round(expected_total, 2) == round(check.new_total, 2)
+            if (check.prices or expected_total is not None) and not confirmed:
+                raise OrderError(
+                    "price_changed",
+                    f"Order {order.id} now totals {check.new_total:.2f} {order.currency} (was {order.total:.2f}); "
+                    "show the buyer the new prices and approve again with expected_total once they confirm",
+                    details={"changes": check.changes, "old_total": order.total, "new_total": check.new_total},
+                )
+            prices = check.prices or None
         decided = await self._orders.decide(
             order.id,
             approve=approve,
             reason=reason,
-            decided_by=DecidedBy(agent_id=agent.agent_id, name=agent.name),
+            decided_by=decided_by,
+            reprice=prices,
+            confirmed_via=confirmed_via,
         )
         return OrderView.of(decided)
 
@@ -296,6 +373,20 @@ class ProcurementService:
         order = self._visible_order(agent, order_id)
         entries = self._store.audit(order.id)
         return AuditView(order_id=order.id, entries=entries, text=render_audit_text(order, entries))
+
+    def _rerun(self, order: Order) -> dict[str, Any]:
+        row = self._store.get_quote(order.quote_id) if order.quote_id else None
+        quote = QuoteView.model_validate_json(row[1]) if row else None
+        return {
+            "request_text": quote.request_text if quote else "",
+            "requirements": order.preferences,
+            "purpose": order.purpose,
+            "delivery_date": order.delivery_date.isoformat(),
+            "lines": [
+                {"product_id": li.product_id, "quantity": li.quantity, "substitute_for": li.substitute_for}
+                for li in order.lines
+            ],
+        }
 
     def _require_future(self, delivery_date: date) -> None:
         if delivery_date < self._now().astimezone(HELSINKI).date():
@@ -348,7 +439,13 @@ class ProcurementService:
         times.append(now)
 
     def _option(
-        self, item: QuoteItem, p: Product, q: ProductQuote, req: QuoteRequest, requirements: list[str]
+        self,
+        item: QuoteItem,
+        p: Product,
+        q: ProductQuote,
+        req: QuoteRequest,
+        requirements: list[str],
+        mandate: list[str],
     ) -> QuoteOption:
         quantity, requested, conversion, conversion_error = item.quantity, None, None, None
         if item.amount is not None:
@@ -396,6 +493,7 @@ class ProcurementService:
             covers_request=q.covers(quantity, req.delivery_date) if quantity else None,
             meets_requirements=not missing,
             missing_requirements=missing,
+            breaks_mandate=any(t in mandate for t in missing),
             delivery_reliability=p.delivery_reliability,
             co2_kg_per_sales_unit=co2,
             co2_kg_total=round(co2 * quantity, 2) if co2 is not None and quantity else None,
@@ -406,6 +504,8 @@ class ProcurementService:
         if len(set(ids)) != len(ids):
             raise OrderError("duplicate_product", "Each product may appear only once per order", status=422)
         options = {o.product_id: o for o in quote.options}
+        mandate = agent.mandate.requirement_tags()
+        violations: list[dict[str, Any]] = []
         lines: list[OrderLine] = []
         for li in req.lines:
             o = options.get(li.product_id)
@@ -433,6 +533,10 @@ class ProcurementService:
                         "orderable": o.orderable,
                     },
                 )
+            # The mandate as it stands now, not as frozen on the quote: a tightened mandate applies at once.
+            broken = [t for t in mandate if not p.has_tags([t])]
+            if broken:
+                violations.append({"product_id": p.id, "name": p.name, "violations": broken})
             missing = [t for t in quote.requirements if not p.has_tags([t])]
             lines.append(
                 OrderLine(
@@ -450,6 +554,14 @@ class ProcurementService:
                     missing_requirements=missing,
                 )
             )
+        if violations:
+            names = "; ".join(f"{v['name']} ({', '.join(v['violations'])})" for v in violations)
+            raise OrderError(
+                "mandate_violation",
+                f"{names} breaks the company mandate; choose another product",
+                status=422,
+                details={"lines": [{"product_id": v["product_id"], "violations": v["violations"]} for v in violations]},
+            )
         now = self._now()
         return Order(
             id=f"ord_{uuid.uuid4().hex[:12]}",
@@ -463,6 +575,7 @@ class ProcurementService:
             lines=lines,
             total=round(sum(li.line_total for li in lines), 2),
             preferences=quote.requirements,
+            purpose=quote.purpose,
             quoted_at=quote.created_at,
             created_at=now,
             updated_at=now,

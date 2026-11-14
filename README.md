@@ -40,9 +40,9 @@ cd apps/api && uv run pytest tests/test_<area>.py   # one test file
 `CLAUDE.md` and backend docs out of the agent's context, so it sees only what an external buyer's
 agent would.
 
-1. Start the API with `mise run dev` and leave it running. The MCP endpoint needs no key: every
-   MCP client acts as the shared agent `agt_mcp` of `API_VALIO_CUSTOMER`, with the global spend
-   threshold as its limit.
+1. Start the API with `mise run dev` and leave it running. The API has no authentication: every
+   MCP and REST client acts as the shared agent `agt_mcp` of `API_VALIO_CUSTOMER`, and every order
+   is checked against the per-order spend limit `API_APPROVAL_SPEND_THRESHOLD_EUR`.
 2. Build the sandbox and start Claude Code in it:
 
    ```sh

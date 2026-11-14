@@ -30,6 +30,19 @@ def _normalise_unit(v: object) -> object:
 BuyerUnit = Annotated[Literal["L", "dl", "cl", "ml", "kg", "g"], BeforeValidator(_normalise_unit)]
 
 
+def _blank_to_none(v: object) -> object:
+    if isinstance(v, str):
+        return v.strip() or None
+    return v
+
+
+Purpose = Annotated[
+    Annotated[str, Field(max_length=200)] | None,
+    BeforeValidator(_blank_to_none),
+    Field(description="What the buyer will use the product for, e.g. 'coffee', 'baking'; guides substitute choice"),
+]
+
+
 OrderScope = Literal["mine", "company"]
 
 
@@ -37,10 +50,9 @@ class Principal(BaseModel):
     agent_id: str
     name: str
     customer: str
-    spend_limit_eur: float = Field(description="Orders above this total (excl. VAT) need human approval")
-    spend_limit_source: str
-    required_tags: list[str] = Field(description="Every order line must meet these, or the order escalates")
-    banned_allergens: list[str] = Field(description="GS1 allergen codes no line may contain without escalation")
+    spend_limit_eur: float = Field(description="An order above this total (excl. VAT) needs human approval")
+    required_tags: list[str] = Field(description="Every order line must meet these, or placement is refused")
+    banned_allergens: list[str] = Field(description="GS1 allergen codes no line may contain; placement is refused")
     quote_ttl_s: float
     max_products_per_quote: int = MAX_QUOTE_ITEMS
 
@@ -152,6 +164,7 @@ class QuoteRequest(BaseModel):
         description="Buyer's requirements as tags (LACTOSE_FREE, brand:Valio, no:AM); frozen on the quote",
     )
     request_text: str = Field(default="", max_length=2000, description="The buyer's request, for the audit trail")
+    purpose: Purpose = None
 
 
 class QuoteOption(BaseModel):
@@ -178,6 +191,9 @@ class QuoteOption(BaseModel):
     covers_request: bool | None = Field(description="Quantity is available by the delivery date")
     meets_requirements: bool
     missing_requirements: list[str]
+    breaks_mandate: bool = Field(
+        default=False, description="A missing tag is part of the company mandate; placing this line is refused"
+    )
     delivery_reliability: float | None
     co2_kg_per_sales_unit: float | None
     co2_kg_total: float | None
@@ -192,6 +208,7 @@ class QuoteView(BaseModel):
     delivery_date: date
     currency: str
     request_text: str
+    purpose: str | None = Field(default=None, description="What the buyer will use the product for; frozen")
     requirements: list[str] = Field(description="Requests plus mandate tags, checked on every line")
     ignored_requirements: list[str] = Field(description="Tags the catalog cannot check; not enforced")
     options: list[QuoteOption]
@@ -222,7 +239,7 @@ class PlaceOrderRequest(BaseModel):
 class OrderView(BaseModel):
     order_id: str
     status: OrderStatus
-    agent_id: str | None = Field(description="The agent key that placed the order")
+    agent_id: str | None = Field(description="The agent that placed the order")
     quote_id: str | None
     client_reference: str | None
     delivery_date: date
@@ -230,7 +247,10 @@ class OrderView(BaseModel):
     total: float
     lines: list[OrderLine]
     requirements: list[str]
-    approval_reasons: list[str] = Field(description="Why a human must approve; empty when placed autonomously")
+    purpose: str | None = Field(description="What the buyer will use the product for, from the quote")
+    approval_reasons: list[str] = Field(
+        description="Why a human must approve (the spend limit); empty when placed autonomously"
+    )
     decision: OrderDecision | None
     created_at: datetime
     updated_at: datetime
@@ -248,6 +268,7 @@ class OrderView(BaseModel):
             total=o.total,
             lines=o.lines,
             requirements=o.preferences,
+            purpose=o.purpose,
             approval_reasons=o.approval_reasons,
             decision=o.decision,
             created_at=o.created_at,

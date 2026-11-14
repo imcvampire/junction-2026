@@ -1,7 +1,7 @@
 ---
 title: Follow the flow on approval - spend-only approval, re-check, buyer purpose and MCP elicitation
 description: Ask for approval only over the spend limit and refuse mandate violations, re-check price and stock when an order is approved, carry the buyer's purpose through quote, order and audit, and make MCP approve/reject ask the human through elicitation.
-status: pending
+status: in-progress
 priority: P1
 effort: 7h
 branch: master
@@ -94,11 +94,11 @@ split. No confirmation-provider abstraction is introduced.
 
 | # | Phase | Depends on | Status |
 |---|---|---|---|
-| 1 | [Approval only for the spend limit; mandate violations refused](phase-01-spend-only-approval.md) | none | pending |
-| 2 | [Re-check price and stock on approval](phase-02-approval-recheck.md) | 1 | pending |
-| 3 | [Buyer purpose on quote, order and audit](phase-03-buyer-purpose.md) | 1 | pending |
-| 4 | [MCP elicitation for approve and reject](phase-04-mcp-elicitation.md) | 2 | pending |
-| 5 | [Skill, docs, flow and live check](phase-05-skill-docs-live-check.md) | 1, 2, 3, 4 | pending |
+| 1 | [Approval only for the spend limit; mandate violations refused](phase-01-spend-only-approval.md) | none | completed |
+| 2 | [Re-check price and stock on approval](phase-02-approval-recheck.md) | 1 | completed |
+| 3 | [Buyer purpose on quote, order and audit](phase-03-buyer-purpose.md) | 1 | completed |
+| 4 | [MCP elicitation for approve and reject](phase-04-mcp-elicitation.md) | 2 | completed |
+| 5 | [Skill, docs, flow and live check](phase-05-skill-docs-live-check.md) | 1, 2, 3, 4 | in-progress (live check open) |
 
 Run in order. Phases 1 to 3 all touch `procurement/service.py` and `procurement/schemas.py`, and
 phases 2 and 3 both touch `orders/models.py` and `render_audit_text`, so they are not parallel.

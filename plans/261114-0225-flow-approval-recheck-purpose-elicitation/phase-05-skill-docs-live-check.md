@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: Skill, docs, flow and live check
-status: pending
+status: in-progress
 depends_on: [1, 2, 3, 4]
 ---
 

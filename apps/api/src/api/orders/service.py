@@ -9,7 +9,7 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from api.orders.models import AuditEntry, DecidedBy, Order, OrderDecision, OrderStatus, utcnow
+from api.orders.models import AuditEntry, ConfirmedVia, DecidedBy, Order, OrderDecision, OrderStatus, utcnow
 from api.orders.store import Store
 from api.valio.client import ProductQuote
 
@@ -54,49 +54,126 @@ class OrderService:
         self.get(order_id)
         return self._store.audit(order_id)
 
-    async def decide(self, order_id: str, *, approve: bool, reason: str, decided_by: DecidedBy) -> Order:
+    async def decide(
+        self,
+        order_id: str,
+        *,
+        approve: bool,
+        reason: str,
+        decided_by: DecidedBy,
+        reprice: dict[str, float] | None = None,
+        confirmed_via: ConfirmedVia = "rest",
+    ) -> Order:
+        """Approve or reject a pending order; `reprice` sets new unit prices the human confirmed first."""
         async with self._locks[order_id]:
             order = self.get(order_id)
             target = OrderStatus.APPROVED if approve else OrderStatus.REJECTED
             if order.status == target:
                 return order
-            if order.status != OrderStatus.PENDING_APPROVAL:
-                raise OrderError(
-                    "invalid_state",
-                    f"Order {order.id} is {order.status.value}; only pending_approval orders can be decided",
-                )
+            self._require_pending(order)
             verb = "Approved" if approve else "Rejected"
             summary = f"{verb} by {decided_by.name} ({decided_by.agent_id})" + (f": {reason}" if reason else "")
             previous = order.status
-            order.status = target
             order.updated_at = utcnow()
+            entries: list[AuditEntry] = []
+            if approve and reprice:
+                entries.append(self._reprice(order, reprice, decided_by))
+            order.status = target
             order.decision = OrderDecision(approved=approve, reason=reason, at=order.updated_at, decided_by=decided_by)
+            entries.append(
+                AuditEntry(
+                    order_id=order.id,
+                    at=order.updated_at,
+                    actor="approver",
+                    action=target.value,
+                    summary=summary,
+                    agent_id=decided_by.agent_id,
+                    details={
+                        "from": previous.value,
+                        "to": target.value,
+                        "decided_by": decided_by.model_dump(),
+                        "confirmed_via": confirmed_via,
+                    },
+                )
+            )
+            self._store.save_order(order, entries)
+            log.info(
+                "order_decided order_id=%s agent_id=%s %s->%s via=%s repriced=%s",
+                order.id,
+                decided_by.agent_id,
+                previous.value,
+                target.value,
+                confirmed_via,
+                bool(entries[:-1]),
+            )
+            return order
+
+    async def close_stale(self, order_id: str, changes: list[dict[str, Any]]) -> Order:
+        """Reject a pending order the wholesaler can no longer fill; the system decides, not a human."""
+        async with self._locks[order_id]:
+            order = self.get(order_id)
+            self._require_pending(order)
+            short = sorted({c["product_id"] for c in changes if c["problem"] != "price_changed"})
+            reason = f"Closed: no longer deliverable as ordered ({', '.join(short)}); quote again"
+            order.status = OrderStatus.REJECTED
+            order.updated_at = utcnow()
+            order.decision = OrderDecision(approved=False, reason=reason, at=order.updated_at, decided_by=None)
             self._store.save_order(
                 order,
                 [
                     AuditEntry(
                         order_id=order.id,
                         at=order.updated_at,
-                        actor="approver",
-                        action=target.value,
-                        summary=summary,
-                        agent_id=decided_by.agent_id,
+                        actor="system",
+                        action=OrderStatus.REJECTED.value,
+                        summary=reason,
                         details={
-                            "from": previous.value,
-                            "to": target.value,
-                            "decided_by": decided_by.model_dump(),
+                            "from": OrderStatus.PENDING_APPROVAL.value,
+                            "to": OrderStatus.REJECTED.value,
+                            "changes": changes,
                         },
                     )
                 ],
             )
-            log.info(
-                "order_decided order_id=%s agent_id=%s %s->%s",
-                order.id,
-                decided_by.agent_id,
-                previous.value,
-                target.value,
-            )
+            log.info("order_closed_stale order_id=%s products=%s", order.id, ",".join(short))
             return order
+
+    @staticmethod
+    def _require_pending(order: Order) -> None:
+        if order.status != OrderStatus.PENDING_APPROVAL:
+            raise OrderError(
+                "invalid_state",
+                f"Order {order.id} is {order.status.value}; only pending_approval orders can be decided",
+            )
+
+    @staticmethod
+    def _reprice(order: Order, prices: dict[str, float], decided_by: DecidedBy) -> AuditEntry:
+        old_total = order.total
+        changed: list[dict[str, Any]] = []
+        for line in order.lines:
+            now = prices.get(line.product_id)
+            if now is None:
+                continue
+            changed.append({"product_id": line.product_id, "was": line.unit_price, "now": now})
+            line.unit_price = now
+            line.line_total = round(now * line.quantity, 2)
+        order.total = round(sum(li.line_total for li in order.lines), 2)
+        return AuditEntry(
+            order_id=order.id,
+            at=order.updated_at,
+            actor="approver",
+            action="repriced",
+            summary=(
+                f"Price changed before approval; {decided_by.name} confirmed the new total "
+                f"{order.total:.2f} {order.currency} (was {old_total:.2f})"
+            ),
+            agent_id=decided_by.agent_id,
+            details={"lines": changed, "old_total": old_total, "new_total": order.total},
+        )
+
+
+def repriced_total(order: Order, prices: dict[str, float]) -> float:
+    return round(sum(round(prices.get(li.product_id, li.unit_price) * li.quantity, 2) for li in order.lines), 2)
 
 
 def availability_problem(product_id: str, name: str, quantity: float, q: ProductQuote) -> dict[str, Any]:
@@ -138,6 +215,8 @@ def render_audit_text(order: Order, entries: list[AuditEntry]) -> str:
         d = e.details
         if d.get("request"):
             out.append(f"    request: {d['request']}")
+        if d.get("purpose"):
+            out.append(f"    purpose: {d['purpose']}")
         if d.get("requirements"):
             out.append(f"    requirements: {', '.join(d['requirements'])}")
         if d.get("options_considered"):
@@ -159,4 +238,9 @@ def render_audit_text(order: Order, entries: list[AuditEntry]) -> str:
             out.append(f"    approval needed because: {'; '.join(d['reasons'])}")
         if d.get("changes"):
             out.append(f"    changes: {d['changes']}")
+        if e.action == "repriced":
+            prices = "; ".join(f"{li['product_id']} {li['was']:.2f} -> {li['now']:.2f}" for li in d.get("lines", []))
+            out.append(f"    total {d['old_total']:.2f} -> {d['new_total']:.2f} {order.currency} ({prices})")
+        if d.get("confirmed_via"):
+            out.append(f"    confirmed via: {d['confirmed_via']}")
     return "\n".join(out)

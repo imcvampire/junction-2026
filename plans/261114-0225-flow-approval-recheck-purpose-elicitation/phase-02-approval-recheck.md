@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: Re-check price and stock on approval
-status: pending
+status: completed
 depends_on: [1]
 ---
 

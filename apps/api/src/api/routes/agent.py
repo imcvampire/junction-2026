@@ -1,11 +1,10 @@
-"""REST twin of the MCP tools: same service, same schemas, same bearer auth."""
+"""REST twin of the MCP tools: same service, same schemas, same shared company agent."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Query
 from fastapi.responses import PlainTextResponse
 
-from api.agents.auth import Agent
 from api.orders.models import Decision, OrderStatus
 from api.orders.service import OrderError
 from api.procurement.schemas import (
@@ -24,7 +23,7 @@ from api.procurement.schemas import (
     SearchResult,
 )
 from api.routes._idempotency import IdempotencyKey, idempotent_decision
-from api.services import Deps
+from api.services import Agent, Deps
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
 
@@ -103,12 +102,12 @@ def list_pending_approvals(svc: Deps, agent: Agent, limit: Annotated[int, Query(
 async def approve_order(
     svc: Deps, agent: Agent, order_id: str, body: Decision, key: IdempotencyKey = None
 ) -> OrderView:
-    return await idempotent_decision(svc, agent, order_id, approve=True, reason=body.reason, key=key)
+    return await idempotent_decision(svc, agent, order_id, body, approve=True, key=key)
 
 
 @router.post("/orders/{order_id}/reject")
 async def reject_order(svc: Deps, agent: Agent, order_id: str, body: Decision, key: IdempotencyKey = None) -> OrderView:
-    return await idempotent_decision(svc, agent, order_id, approve=False, reason=body.reason, key=key)
+    return await idempotent_decision(svc, agent, order_id, body, approve=False, key=key)
 
 
 @router.get("/orders/{order_id}")

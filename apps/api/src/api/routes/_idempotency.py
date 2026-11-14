@@ -7,6 +7,7 @@ from fastapi import Header
 from pydantic import BaseModel
 
 from api.agents.models import AgentPrincipal
+from api.orders.models import Decision
 from api.orders.store import Store
 from api.procurement.schemas import OrderView
 from api.services import Services
@@ -28,13 +29,18 @@ async def idempotent[M: BaseModel](
 
 
 async def idempotent_decision(
-    svc: Services, agent: AgentPrincipal, order_id: str, *, approve: bool, reason: str, key: str | None
+    svc: Services, agent: AgentPrincipal, order_id: str, body: Decision, *, approve: bool, key: str | None
 ) -> OrderView:
-    """Approve or reject; a repeated key from the same agent replays the first response."""
+    """Approve or reject; a repeated key from the same agent replays the first response.
+
+    REST cannot ask the human itself, so the decision is recorded as `confirmed_via: rest`.
+    """
     return await idempotent(
         svc.store,
         f"{'approve' if approve else 'reject'}:{agent.agent_id}:{order_id}",
         key,
         OrderView,
-        lambda: svc.procurement.decide(agent, order_id, approve=approve, reason=reason),
+        lambda: svc.procurement.decide(
+            agent, order_id, approve=approve, reason=body.reason, expected_total=body.expected_total
+        ),
     )

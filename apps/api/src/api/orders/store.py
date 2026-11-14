@@ -1,4 +1,4 @@
-"""SQLite persistence for agents, quotes, orders, the audit trail and idempotency keys.
+"""SQLite persistence for quotes, orders, the audit trail and idempotency keys.
 
 Single process, small rows: one connection guarded by a lock. Queries are short, so they run
 inline on the event loop rather than in a thread pool. Schema changes are additive only.
@@ -39,15 +39,6 @@ CREATE TABLE IF NOT EXISTS idempotency (
     response TEXT NOT NULL,
     PRIMARY KEY (scope, key)
 );
-CREATE TABLE IF NOT EXISTS agents (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    customer TEXT NOT NULL,
-    key_hash TEXT NOT NULL UNIQUE,
-    mandate TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    disabled INTEGER NOT NULL DEFAULT 0
-);
 CREATE TABLE IF NOT EXISTS quotes (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -80,7 +71,7 @@ class Store:
         self._lock = threading.RLock()
 
     def _migrate(self) -> None:
-        """Additive column migrations, serialised across processes (API and CLI) by BEGIN IMMEDIATE."""
+        """Additive column migrations, serialised across processes by BEGIN IMMEDIATE."""
         c = self._conn
         c.execute("BEGIN IMMEDIATE")
         try:
@@ -218,56 +209,6 @@ class Store:
         with self._lock:
             self._conn.execute(
                 "INSERT OR IGNORE INTO idempotency(scope, key, response) VALUES (?, ?, ?)", (scope, key, response)
-            )
-
-    def insert_agent(
-        self,
-        agent_id: str,
-        name: str,
-        customer: str,
-        key_hash: str,
-        mandate: str,
-        created_at: datetime,
-    ) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO agents(id, name, customer, key_hash, mandate, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (agent_id, name, customer, key_hash, mandate, created_at.isoformat()),
-            )
-
-    def upsert_keyless_agent(self, agent_id: str, name: str, customer: str, mandate: str, created_at: datetime) -> None:
-        """Insert or rename/rehome a keyless agent, keeping its mandate and disabled flag."""
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO agents(id, name, customer, key_hash, mandate, created_at) VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, customer = excluded.customer",
-                (agent_id, name, customer, f"keyless:{agent_id}", mandate, created_at.isoformat()),
-            )
-
-    def agent_by_id(self, agent_id: str) -> tuple[Any, ...] | None:
-        with self._lock:
-            return self._conn.execute(
-                "SELECT id, name, customer, mandate, created_at, disabled FROM agents WHERE id = ?", (agent_id,)
-            ).fetchone()
-
-    def agent_by_key_hash(self, key_hash: str) -> tuple[Any, ...] | None:
-        with self._lock:
-            return self._conn.execute(
-                "SELECT id, name, customer, mandate, created_at, disabled FROM agents WHERE key_hash = ?",
-                (key_hash,),
-            ).fetchone()
-
-    def list_agents(self) -> list[tuple[Any, ...]]:
-        with self._lock:
-            return self._conn.execute(
-                "SELECT id, name, customer, mandate, created_at, disabled FROM agents ORDER BY created_at"
-            ).fetchall()
-
-    def set_agent_disabled(self, agent_id: str, disabled: bool) -> bool:
-        with self._lock:
-            return (
-                self._conn.execute("UPDATE agents SET disabled = ? WHERE id = ?", (int(disabled), agent_id)).rowcount
-                == 1
             )
 
     def save_quote(self, quote_id: str, agent_id: str, data: str, expires_at: datetime) -> None:

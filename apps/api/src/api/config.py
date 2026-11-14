@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     quote_cache_ttl_s: float = 180.0
 
     approval_spend_threshold_eur: float = 500.0
+    # Company mandate: every order line must carry these tags and contain none of these GS1 allergen codes.
+    # JSON lists, e.g. API_REQUIRED_TAGS='["LACTOSE_FREE"]', API_BANNED_ALLERGENS='["AM"]'.
+    required_tags: list[str] = []
+    banned_allergens: list[str] = []
 
     quote_ttl_s: float = 900.0
     agent_quotes_per_minute: int = 30

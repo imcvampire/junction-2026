@@ -10,10 +10,10 @@ from fastapi.responses import JSONResponse
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from starlette.routing import Route
 
-from api.agents.registry import AgentRegistry
+from api.agents.models import Mandate, shared_agent
 from api.catalog.index import Catalog, load_catalog
 from api.config import Settings, get_settings
-from api.mcp.server import MCP_AGENT_ID, MCP_AGENT_NAME, build_mcp_server
+from api.mcp.server import build_mcp_server
 from api.orders.policy import ApprovalPolicy
 from api.orders.service import OrderError, OrderService
 from api.orders.store import Store
@@ -52,14 +52,12 @@ def create_app(
         valio = ValioClient(http, api_key=api_key, cache_ttl_s=cfg.quote_cache_ttl_s)
         store = Store(cfg.db_path)
         orders = OrderService(store)
-        agents = AgentRegistry(store)
         app.state.services = Services(
             settings=cfg,
             catalog=cat,
             valio=valio,
             store=store,
             orders=orders,
-            agents=agents,
             procurement=ProcurementService(
                 store,
                 cat,
@@ -69,7 +67,10 @@ def create_app(
                 quote_ttl_s=cfg.quote_ttl_s,
                 quotes_per_minute=cfg.agent_quotes_per_minute,
             ),
-            mcp_agent=agents.keyless(MCP_AGENT_ID, MCP_AGENT_NAME, cfg.valio_customer),
+            agent=shared_agent(
+                cfg.valio_customer,
+                Mandate(required_tags=cfg.required_tags, banned_allergens=cfg.banned_allergens),
+            ),
         )
         try:
             async with mcp_server.session_manager.run():

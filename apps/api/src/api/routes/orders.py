@@ -1,13 +1,12 @@
-"""Approval endpoints for the order console. They take an agent key and act on any order of its customer."""
+"""Approval endpoints for the order console. They act as the shared company agent on any order of the company."""
 
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
-from api.agents.auth import Agent
 from api.orders.models import AuditEntry, Decision
 from api.procurement.schemas import OrderView
 from api.routes._idempotency import IdempotencyKey, idempotent_decision
-from api.services import Deps
+from api.services import Agent, Deps
 
 router = APIRouter(prefix="/orders", tags=["approval"])
 
@@ -19,12 +18,12 @@ def get_order(svc: Deps, agent: Agent, order_id: str) -> OrderView:
 
 @router.post("/{order_id}/approve")
 async def approve(svc: Deps, agent: Agent, order_id: str, body: Decision, key: IdempotencyKey = None) -> OrderView:
-    return await idempotent_decision(svc, agent, order_id, approve=True, reason=body.reason, key=key)
+    return await idempotent_decision(svc, agent, order_id, body, approve=True, key=key)
 
 
 @router.post("/{order_id}/reject")
 async def reject(svc: Deps, agent: Agent, order_id: str, body: Decision, key: IdempotencyKey = None) -> OrderView:
-    return await idempotent_decision(svc, agent, order_id, approve=False, reason=body.reason, key=key)
+    return await idempotent_decision(svc, agent, order_id, body, approve=False, key=key)
 
 
 @router.get("/{order_id}/audit")

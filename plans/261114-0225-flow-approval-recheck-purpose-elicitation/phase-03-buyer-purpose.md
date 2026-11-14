@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: Buyer purpose on quote, order and audit
-status: pending
+status: completed
 depends_on: [1]
 ---
 

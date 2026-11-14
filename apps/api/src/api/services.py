@@ -4,7 +4,6 @@ from typing import Annotated, cast
 from fastapi import Depends, Request
 
 from api.agents.models import AgentPrincipal
-from api.agents.registry import AgentRegistry
 from api.catalog.index import Catalog
 from api.config import Settings
 from api.orders.service import OrderService
@@ -20,9 +19,8 @@ class Services:
     valio: ValioClient
     store: Store
     orders: OrderService
-    agents: AgentRegistry
     procurement: ProcurementService
-    mcp_agent: AgentPrincipal
+    agent: AgentPrincipal
 
 
 def get_services(request: Request) -> Services:
@@ -30,3 +28,10 @@ def get_services(request: Request) -> Services:
 
 
 Deps = Annotated[Services, Depends(get_services)]
+
+
+def get_agent(request: Request) -> AgentPrincipal:
+    return get_services(request).agent
+
+
+Agent = Annotated[AgentPrincipal, Depends(get_agent)]

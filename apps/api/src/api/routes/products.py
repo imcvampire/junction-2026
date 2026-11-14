@@ -1,4 +1,4 @@
-"""Public static catalog search. No prices: those are customer-specific and need an agent key."""
+"""Public static catalog search. No prices: those are customer-specific and come from the agent API."""
 
 from typing import Annotated
 

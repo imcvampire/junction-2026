@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: MCP elicitation for approve and reject
-status: pending
+status: completed
 depends_on: [2]
 ---
 

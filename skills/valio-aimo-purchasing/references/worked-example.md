@@ -5,7 +5,7 @@ requirements based on price and availability."* Today is Friday 2026-11-13.
 
 ## 1. Authority
 
-`whoami` returns `spend_limit_eur: 500` from the `global threshold`, with no mandate tags. An order
+`whoami` returns a per-order `spend_limit_eur: 500`, with no mandate tags. An order
 over 500 EUR will need a human, so tell the buyer early that it will be sent for approval.
 
 ## 2. Narrow
@@ -61,7 +61,7 @@ Rank 1 carries `cheapest_covering_option: true`.
 ```
 
 The response has `status: pending_approval` and the reason
-`Total 1540.00 EUR exceeds the 500.00 EUR spend limit (global threshold)`.
+`Total 1540.00 EUR exceeds the 500.00 EUR per-order spend limit`.
 
 ## 5. Report
 
@@ -72,29 +72,48 @@ The response has `status: pending_approval` and the reason
 
 ## 6. The buyer decides
 
-Ask straight away with `AskUserQuestion` (`Approve (Recommended)`, `Reject`), and take the reason
-from the free-text answer. The buyer answers "approve it, it is
-for the gala dinner". Only then call:
+Do not ask whether to decide now. Right after the report in section 5, call `approve_order`. The
+buyer has not given a reason yet, so leave `reason` out:
 
 ```json
-{"order_id": "ord_…", "reason": "For the gala dinner"}
+{"order_id": "ord_…"}
 ```
 
-on `approve_order`, and report `approved` with `decided_by` naming your own agent.
+The server re-checks price and stock, then the host shows the buyer its own form:
+
+> Approve order ord_… placed by agent agt_mcp?
+> Total 1540.00 EUR, delivery 2026-11-16.
+> - 100 KI 464119 Valio skimmed milk 1 l lactose free UHT @ 15.40 = 1540.00
+> Needs approval because: Total 1540.00 EUR exceeds the 500.00 EUR per-order spend limit
+>
+> decision: `approve` / `reject` (default `approve`) · reason: (empty, required)
+
+The buyer types "For the gala dinner" and submits. Report `approved`, the buyer's reason from `decision.reason`, and `decided_by`
+naming your own agent. If they decline or dismiss the form, the tool returns `decision_cancelled`:
+say the order is still waiting and do not call again unless they ask. If the host cannot show forms
+(`elicitation_required`), send the buyer to the order console.
 
 ## If the price moves
 
-If `place_order` returns `quote_changed` with
+Before an order exists: if `place_order` returns `quote_changed` with
 `details.changes = [{"problem": "price_changed", "was": 15.4, "now": 16.0}]`, no order was created.
 Quote again, check that the ranking still holds, and ask the buyer with a dialog whether to order
 at the new total before you place it.
+
+While the order waits for approval: if the price moved, the approval form itself shows it, for
+example `PRICE CHANGED since the order was placed: 464119 15.40 -> 16.00. New total 1600.00 EUR
+(was 1540.00).` Accepting the form approves at 1,600.00 EUR, and the audit records a `repriced`
+entry before `approved`. If stock no longer covers the order, no form is shown: the tool returns
+`stock_changed`, the order is closed, and you tell the buyer what ran out, then quote again from
+step 3 with `details.rerun` (same request text, requirements, purpose and date).
 
 ## When the buyer must choose
 
 Suppose the first order covered only 698 L with Valio Café milk, and the remaining 302 L must come
 from a substitute. The re-quote returns four Arla lactose-free options that all cover 302 L, but
 they differ in format and one ordering-deadline field looks already passed. The ranking rules would
-pick the cheapest, yet the format change is the buyer's call, so ask (step 4a).
+pick the cheapest, yet the format change is the buyer's call, so ask (step 4a). The buyer said the
+milk is for coffee, so the substitutes were quoted with `"purpose": "coffee"`.
 
 Show the table first (figures illustrative):
 

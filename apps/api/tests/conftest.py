@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from api.agents.models import AgentPrincipal, Mandate
 from api.catalog.index import Catalog, load_catalog
 from api.config import Settings
 from api.main import create_app
@@ -115,23 +114,3 @@ def client(settings: Settings, catalog: Catalog, fake_valio: FakeValio) -> Itera
 
 def services_of(client: TestClient) -> Services:
     return cast(Services, cast(FastAPI, client.app).state.services)
-
-
-AgentFactory = Callable[..., tuple[AgentPrincipal, str]]
-
-
-@pytest.fixture
-def make_agent(client: TestClient) -> AgentFactory:
-    def make(name: str = "hotel-agent", customer: str = "hotel-1", **mandate: Any) -> tuple[AgentPrincipal, str]:
-        return services_of(client).agents.create(name, customer, Mandate(**mandate))
-
-    return make
-
-
-@pytest.fixture
-def agent_key(make_agent: AgentFactory) -> str:
-    return make_agent()[1]
-
-
-def bearer(key: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {key}"}

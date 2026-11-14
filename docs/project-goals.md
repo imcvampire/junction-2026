@@ -43,7 +43,7 @@ it, and preview in AR how the order would be picked in the warehouse.
 | # | Goal |
 |---|------|
 | B1 | Wrap the Valio Aimo challenge APIs (product data, price, availability, delivery reliability, carbon footprint); never call price or availability for the whole catalog. |
-| B2 | Enforce permission and human-approval rules server-side: an order above the spend limit becomes *pending approval* instead of being placed, and a line that breaks the agent's mandate (required tags, banned allergens) is refused. A line that misses only the buyer's own stated preferences is the buyer's choice and is placed, with the miss recorded. |
+| B2 | Enforce permission and human-approval rules server-side: an order above the spend limit becomes *pending approval* instead of being placed, and a line that breaks the company mandate (required tags, banned allergens) is refused. A line that misses only the buyer's own stated preferences is the buyer's choice and is placed, with the miss recorded. |
 | B3 | Let a human approve or reject a pending order, and let the agent see the outcome. |
 | B4 | Keep a human-readable audit trail for every order: which agent, the request, options considered, the choice, the reason, and every status change. |
 | B5 | Store a complete order record: the original request as the agent sent it, the requirements it declared, the quote (prices and availability it was placed against), the ordered lines in sales units, every substitution (original product, substitute, reason, and whether it stays within the stated requirements), the approval decision with who decided and why, and the order's chat messages. |
@@ -73,20 +73,24 @@ it, and preview in AR how the order would be picked in the warehouse.
 - **Spend threshold:** one configured amount (default 500 EUR excl. VAT), applied to each order on
   its own. Splitting a purchase into smaller orders avoids escalation; accepted for the demo. A
   quote can be used for one order only.
-- **Per-agent mandate:** each agent may carry its own spend limit, which defaults to the global
-  threshold, plus required tags and banned allergens that apply to every quote it makes.
+- **Company mandate:** required tags and banned allergens set once for the company
+  (`API_REQUIRED_TAGS`, `API_BANNED_ALLERGENS`) apply to every quote and order. The spend limit is
+  not part of it.
 - **Fixed-price quotes:** a quote is a server-side record owned by one agent, with an expiry
   (default 15 minutes). It is not signed; a signature only matters to a third-party verifier and
   can be added later without changing the tool contract.
-- **Agent credentials:** opaque bearer keys stored only as SHA-256 hashes, issued with
-  `mise run agent:create`, for the REST API. The MCP endpoint is unauthenticated for the PoC: all
-  agents work for the same company (`API_VALIO_CUSTOMER`) as one shared agent. OAuth 2.1 is the
-  production path.
-- **Approval access:** there are no roles. The buyer approves or rejects an escalated order through
-  the agent interface: the shared MCP agent, or any agent key of the order's customer over
-  `/api/agent/v1` or the console's `/api/orders` routes, may decide it on the human's instruction,
-  the placing agent included. The deciding agent is recorded on the order and in the audit. The server cannot prove a human said
-  yes; that is accepted for the demo.
+- **No authentication:** for the PoC all agents work for the same company (`API_VALIO_CUSTOMER`),
+  so every MCP and REST client acts as one shared agent and there are no credentials. OAuth 2.1 is
+  the production path.
+- **Approval access:** there are no roles. The buyer approves or rejects an order over the spend
+  limit through the agent interface: the shared agent, over MCP,
+  `/api/agent/v1` or the console's `/api/orders` routes, the placing agent included. Approving
+  re-checks price and stock first: a price change must be confirmed at the new total, and an order
+  whose stock ran out is closed so the agent re-runs the flow. On MCP the server asks the human
+  itself through an elicitation form and records the form's decision and reason
+  (`confirmed_via: mcp_elicitation`); a client without elicitation cannot decide. Over REST the
+  server cannot prove a human said yes (`confirmed_via: rest`); that is accepted for the demo. The
+  deciding agent is recorded on the order and in the audit.
 - **Interaction model:** the customer brings the agent. Our in-house LLM agent and voice work is
   not part of the product (the mobile frontend has been removed). The only frontend is the order
   console (F1–F4), which is for oversight and approval; no order is created from it.
@@ -150,8 +154,8 @@ The product owner may still provide a flow diagram that refines these steps.
 2. Voice and conversation endpoints are gone. Can the removed AR code (`orders/gltf.py`,
    `orders/footprint.py`) be reused for F3, or should the AR view be rebuilt on the frontend?
 3. Who uses the order console: the customer's own approvers, Valio Aimo staff, or both? This
-   decides which orders each user sees. Until it is answered, the console authenticates with any
-   agent key and sees that customer's orders.
+   decides which orders each user sees. Until it is answered, the console has no login and sees
+   the company's orders.
 4. Who takes part in an order's chat: only humans, or can the purchasing agent read and reply
    through MCP (for example to explain a substitution)?
 5. Which device does the AR view target: phone or tablet AR (WebXR), with a 3D browser view as
