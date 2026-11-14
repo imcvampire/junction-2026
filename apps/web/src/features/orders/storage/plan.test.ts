@@ -91,6 +91,19 @@ describe("packRow", () => {
     const rows = new Set(placed.map((b) => b.z))
     expect(rows.size).toBe(2)
   })
+
+  it("places stacks flush against each other by default", () => {
+    const items = storageItems(
+      [line({ product_id: "A", quantity: 3 })],
+      new Map([["A", pack({ width_mm: 1000, length_mm: 1000, sales_units_per_pack: 1 })]])
+    )
+    const placed = packRow(buildBlocks(items, 0.2), 2.4)
+    expect(placed.map((b) => [b.x, b.z])).toEqual([
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ])
+  })
 })
 
 describe("fitReport", () => {

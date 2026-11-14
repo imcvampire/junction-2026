@@ -1,16 +1,13 @@
 import { useMemo, useRef, useState } from "react"
-import { BoxIcon, RotateCcwIcon, ViewIcon } from "lucide-react"
+import { BoxIcon, BoxesIcon, MapIcon, RotateCcwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatNumber } from "@/features/journal-viewer/format"
-import { Model3dAr } from "@/features/orders/components/model-3d"
+import { ArLaunchButton } from "@/features/orders/components/ar-launch-button"
+import { Storage3dView } from "@/features/orders/components/storage-3d-view"
 import type { OrderLine, ProductView } from "@/features/orders/types"
-import {
-  layoutToUsdz,
-  openInQuickLook,
-  supportsQuickLook,
-} from "@/features/orders/storage/ar"
-import { colorCss, colorHex } from "@/features/orders/storage/colors"
+import { stackColors } from "@/features/orders/storage/colors"
 import {
   DEFAULT_MAX_STACK_M,
   fitReport,
@@ -31,7 +28,8 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 function round(v: number, step: number): number {
-  return Math.round(v / step) * step
+  // toFixed strips float noise such as 2.4000000000000004 from the inputs.
+  return Number((Math.round(v / step) * step).toFixed(6))
 }
 
 function NumberField({
@@ -96,11 +94,32 @@ export function StoragePlanner({
       DEFAULT_MAX_STACK_M
     )
   )
-  const [arBusy, setArBusy] = useState(false)
-  const [arError, setArError] = useState<string | null>(null)
 
   const fit = useMemo(() => fitReport(blocks, room), [blocks, room])
   const summary = useMemo(() => planSummary(items, blocks), [items, blocks])
+  const colors = useMemo(() => stackColors(blocks), [blocks])
+  // Per product, each stack height with its shade and how many stacks have it,
+  // tallest first, for the legend.
+  const heightsByLine = useMemo(() => {
+    const byLine = new Map<
+      number,
+      { packs: number; stacks: number; css: string }[]
+    >()
+    for (const b of blocks) {
+      const rows = byLine.get(b.lineIndex) ?? []
+      const row = rows.find((r) => r.packs === b.packsInColumn)
+      if (row) row.stacks++
+      else
+        rows.push({
+          packs: b.packsInColumn,
+          stacks: 1,
+          css: colors.get(b.id)?.css ?? "",
+        })
+      byLine.set(b.lineIndex, rows)
+    }
+    for (const rows of byLine.values()) rows.sort((a, b) => b.packs - a.packs)
+    return byLine
+  }, [blocks, colors])
 
   const scale = clamp(
     Math.min(PLAN_W_PX / room.width, PLAN_D_PX / room.depth),
@@ -109,7 +128,6 @@ export function StoragePlanner({
   )
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ id: string; dx: number; dz: number } | null>(null)
-  const arUrlRef = useRef<string | null>(null)
 
   function resetToRecommended(stack: number): void {
     const r = recommendedRoom(items, stack)
@@ -117,7 +135,10 @@ export function StoragePlanner({
     setBlocks(recommendLayout(items, r, stack))
   }
 
-  function metresAt(clientX: number, clientY: number): { x: number; z: number } {
+  function metresAt(
+    clientX: number,
+    clientY: number
+  ): { x: number; z: number } {
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, z: 0 }
     return {
@@ -157,26 +178,6 @@ export function StoragePlanner({
     e.currentTarget.releasePointerCapture?.(e.pointerId)
   }
 
-  async function viewInAr(): Promise<void> {
-    setArError(null)
-    if (!supportsQuickLook()) {
-      setArError(
-        "AR view needs Safari on an iPhone or iPad. Open this page there and tap View in AR."
-      )
-      return
-    }
-    setArBusy(true)
-    try {
-      const blob = await layoutToUsdz(blocks, room, colorHex)
-      if (arUrlRef.current) URL.revokeObjectURL(arUrlRef.current)
-      arUrlRef.current = openInQuickLook(blob)
-    } catch (err) {
-      setArError(`Could not build the AR model (${String(err)}).`)
-    } finally {
-      setArBusy(false)
-    }
-  }
-
   const canPlan = summary.sizedLines > 0
   const gridStep = 0.5
 
@@ -194,7 +195,7 @@ export function StoragePlanner({
         </h2>
         <p className="text-sm text-muted-foreground">
           A suggested way to store this delivery, at true scale. Drag the stacks
-          to rearrange, set your room size, then check it in AR.
+          on the floor plan, see how packs stack up in 3D, then check it in AR.
         </p>
       </div>
 
@@ -252,88 +253,104 @@ export function StoragePlanner({
           </div>
 
           <div className="flex flex-col gap-4 lg:flex-row">
-            <div className="min-w-0 overflow-auto">
-              <svg
-                ref={svgRef}
-                width={room.width * scale}
-                height={room.depth * scale}
-                viewBox={`0 0 ${room.width * scale} ${room.depth * scale}`}
-                role="img"
-                aria-label={`Top-down storage plan, room ${formatNumber(room.width)} by ${formatNumber(room.depth)} metres`}
-                className="touch-none rounded-lg border bg-muted/30"
-              >
-                <g>
-                  {Array.from(
-                    { length: Math.floor(room.width / gridStep) },
-                    (_, i) => (
-                      <line
-                        key={`v${i}`}
-                        x1={(i + 1) * gridStep * scale}
-                        y1={0}
-                        x2={(i + 1) * gridStep * scale}
-                        y2={room.depth * scale}
-                        className="stroke-foreground/5"
-                      />
+            <Tabs defaultValue="plan" className="min-w-0">
+              <TabsList aria-label="Storage plan view">
+                <TabsTrigger value="plan">
+                  <MapIcon aria-hidden /> Floor plan
+                </TabsTrigger>
+                <TabsTrigger value="3d">
+                  <BoxesIcon aria-hidden /> 3D stacks
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="plan" className="min-w-0 overflow-auto">
+                <svg
+                  ref={svgRef}
+                  width={room.width * scale}
+                  height={room.depth * scale}
+                  viewBox={`0 0 ${room.width * scale} ${room.depth * scale}`}
+                  role="img"
+                  aria-label={`Top-down storage plan, room ${formatNumber(room.width)} by ${formatNumber(room.depth)} metres`}
+                  className="touch-none rounded-lg border bg-muted/30"
+                >
+                  <g>
+                    {Array.from(
+                      { length: Math.floor(room.width / gridStep) },
+                      (_, i) => (
+                        <line
+                          key={`v${i}`}
+                          x1={(i + 1) * gridStep * scale}
+                          y1={0}
+                          x2={(i + 1) * gridStep * scale}
+                          y2={room.depth * scale}
+                          className="stroke-foreground/5"
+                        />
+                      )
+                    )}
+                    {Array.from(
+                      { length: Math.floor(room.depth / gridStep) },
+                      (_, i) => (
+                        <line
+                          key={`h${i}`}
+                          x1={0}
+                          y1={(i + 1) * gridStep * scale}
+                          x2={room.width * scale}
+                          y2={(i + 1) * gridStep * scale}
+                          className="stroke-foreground/5"
+                        />
+                      )
+                    )}
+                  </g>
+                  {blocks.map((b) => {
+                    const over = fit.overflow.has(b.id)
+                    const lap = fit.overlapping.has(b.id)
+                    const color = colors.get(b.id)
+                    const side = Math.min(b.w, b.d) * scale
+                    return (
+                      <g
+                        key={b.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${b.name}, ${b.packsInColumn} packs, ${formatNumber(b.w)} by ${formatNumber(b.d)} m`}
+                        className="cursor-grab touch-none active:cursor-grabbing"
+                        onPointerDown={(e) => onBlockPointerDown(e, b)}
+                        onPointerMove={onBlockPointerMove}
+                        onPointerUp={onBlockPointerUp}
+                      >
+                        <rect
+                          x={b.x * scale}
+                          y={b.z * scale}
+                          width={b.w * scale}
+                          height={b.d * scale}
+                          rx={Math.min(3, side / 4)}
+                          fill={color?.css}
+                          stroke={
+                            over ? "#dc2626" : lap ? "#d97706" : "#1f2a44"
+                          }
+                          strokeWidth={over || lap ? 3 : 1}
+                          strokeDasharray={lap && !over ? "5 3" : undefined}
+                        />
+                        {side >= 11 ? (
+                          <text
+                            x={(b.x + b.w / 2) * scale}
+                            y={(b.z + b.d / 2) * scale}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill={color?.text}
+                            fontSize={clamp(side * 0.55, 7, 11)}
+                            className="pointer-events-none font-semibold tabular-nums"
+                          >
+                            {b.packsInColumn}
+                          </text>
+                        ) : null}
+                      </g>
                     )
-                  )}
-                  {Array.from(
-                    { length: Math.floor(room.depth / gridStep) },
-                    (_, i) => (
-                      <line
-                        key={`h${i}`}
-                        x1={0}
-                        y1={(i + 1) * gridStep * scale}
-                        x2={room.width * scale}
-                        y2={(i + 1) * gridStep * scale}
-                        className="stroke-foreground/5"
-                      />
-                    )
-                  )}
-                </g>
-                {blocks.map((b) => {
-                  const over = fit.overflow.has(b.id)
-                  const lap = fit.overlapping.has(b.id)
-                  return (
-                    <g
-                      key={b.id}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${b.name}, ${b.packsInColumn} packs, ${formatNumber(b.w)} by ${formatNumber(b.d)} m`}
-                      className="cursor-grab touch-none active:cursor-grabbing"
-                      onPointerDown={(e) => onBlockPointerDown(e, b)}
-                      onPointerMove={onBlockPointerMove}
-                      onPointerUp={onBlockPointerUp}
-                    >
-                      <rect
-                        x={b.x * scale}
-                        y={b.z * scale}
-                        width={b.w * scale}
-                        height={b.d * scale}
-                        rx={3}
-                        fill={colorCss(b.lineIndex)}
-                        fillOpacity={0.85}
-                        stroke={
-                          over ? "#dc2626" : lap ? "#d97706" : "#1f2a44"
-                        }
-                        strokeWidth={over || lap ? 3 : 1}
-                        strokeDasharray={lap && !over ? "5 3" : undefined}
-                      />
-                      {b.w * scale > 22 && b.d * scale > 16 ? (
-                        <text
-                          x={(b.x + b.w / 2) * scale}
-                          y={(b.z + b.d / 2) * scale}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          className="pointer-events-none fill-white text-[10px] font-semibold"
-                        >
-                          {b.packsInColumn}
-                        </text>
-                      ) : null}
-                    </g>
-                  )
-                })}
-              </svg>
-            </div>
+                  })}
+                </svg>
+              </TabsContent>
+              <TabsContent value="3d" className="w-full min-w-0 lg:w-[540px]">
+                <Storage3dView blocks={blocks} room={room} fit={fit} />
+              </TabsContent>
+            </Tabs>
 
             <div className="flex min-w-0 flex-1 flex-col gap-4">
               <div
@@ -352,48 +369,49 @@ export function StoragePlanner({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Floor use {Math.round(fit.utilisation * 100)}% ·{" "}
                   {summary.totalColumns} stacks · {summary.totalPacks} packs ·{" "}
-                  {formatNumber(Math.round(summary.totalVolumeM3 * 100) / 100)} m³
+                  {formatNumber(Math.round(summary.totalVolumeM3 * 100) / 100)}{" "}
+                  m³
                   {summary.totalGrossKg !== null
                     ? ` · ${formatNumber(Math.round(summary.totalGrossKg))} kg`
                     : ""}
                 </p>
               </div>
 
-              {supportsQuickLook() ? (
-                <div className="flex flex-col gap-1">
-                  <Button
-                    type="button"
-                    onClick={() => void viewInAr()}
-                    disabled={arBusy}
-                  >
-                    <ViewIcon aria-hidden />
-                    {arBusy ? "Preparing AR…" : "View in your space (AR)"}
-                  </Button>
-                  {arError ? (
-                    <p role="status" className="text-xs text-amber-600">
-                      {arError}
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <Model3dAr blocks={blocks} room={room} />
-              )}
+              <ArLaunchButton blocks={blocks} room={room} />
 
               <ul className="flex flex-col gap-1.5 text-sm">
                 {items
                   .filter((it) => it.box && it.packs > 0)
                   .map((it) => (
-                    <li key={it.lineIndex} className="flex items-center gap-2">
-                      <span
-                        aria-hidden
-                        className="size-3 shrink-0 rounded-sm"
-                        style={{ backgroundColor: colorCss(it.lineIndex) }}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{it.name}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                        {it.packs} packs
-                        {it.estimated ? " · est. size" : ""}
-                      </span>
+                    <li key={it.lineIndex} className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate">
+                          {it.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                          {it.packs} packs
+                          {it.estimated ? " · est. size" : ""}
+                        </span>
+                      </div>
+                      <ul
+                        aria-label={`Stack heights for ${it.name}`}
+                        className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums"
+                      >
+                        {(heightsByLine.get(it.lineIndex) ?? []).map((h) => (
+                          <li
+                            key={h.packs}
+                            className="flex items-center gap-1.5"
+                          >
+                            <span
+                              aria-hidden
+                              className="size-3 shrink-0 rounded-sm"
+                              style={{ backgroundColor: h.css }}
+                            />
+                            {h.packs} high × {h.stacks}{" "}
+                            {h.stacks === 1 ? "stack" : "stacks"}
+                          </li>
+                        ))}
+                      </ul>
                     </li>
                   ))}
               </ul>

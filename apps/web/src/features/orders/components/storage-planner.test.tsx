@@ -1,9 +1,17 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
 
 import type { OrderLine, ProductView } from "@/features/orders/types"
 
 import { StoragePlanner } from "./storage-planner"
+
+// The 3D view loads three.js from a CDN; keep tests offline.
+vi.mock("@/features/orders/storage/ar", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/orders/storage/ar")>()),
+  loadThree: () => new Promise(() => {}),
+  loadOrbitControls: () => new Promise(() => {}),
+}))
 
 function line(product_id: string, quantity: number, name: string): OrderLine {
   return {
@@ -22,10 +30,7 @@ function line(product_id: string, quantity: number, name: string): OrderLine {
   }
 }
 
-function product(
-  id: string,
-  pack: ProductView["pack"]
-): ProductView {
+function product(id: string, pack: ProductView["pack"]): ProductView {
   return {
     id,
     name: id,
@@ -55,7 +60,7 @@ const sizedPack = {
 }
 
 describe("StoragePlanner", () => {
-  it("draws a stack per column and offers the AR view", () => {
+  it("draws a stack per column and explains where AR works", async () => {
     const lines = [line("A", 3, "Milk"), line("B", 2, "Flour")]
     const packs = new Map<string, ProductView | null>([
       ["A", product("A", sizedPack)],
@@ -67,20 +72,68 @@ describe("StoragePlanner", () => {
     )
     // 1 column for A + 2 columns for B = 3 draggable stacks.
     expect(container.querySelectorAll('g[role="button"]')).toHaveLength(3)
-    // jsdom has no AR Quick Look, so the model-viewer (Android/desktop) path shows.
-    expect(
-      screen.getByRole("button", { name: /build 3d \/ ar view/i })
-    ).toBeInTheDocument()
+    // jsdom supports neither Quick Look nor WebXR AR, so it explains where AR works.
+    expect(await screen.findByText(/ar opens on a phone/i)).toBeInTheDocument()
     expect(screen.getByText("Milk")).toBeInTheDocument()
     expect(screen.getByText("Flour")).toBeInTheDocument()
   })
 
+  it("switches to a 3D view of the stacks", async () => {
+    const lines = [line("A", 3, "Milk"), line("B", 2, "Flour")]
+    const packs = new Map<string, ProductView | null>([
+      ["A", product("A", sizedPack)],
+      ["B", product("B", { ...sizedPack, height_mm: 1000 })],
+    ])
+    render(<StoragePlanner lines={lines} packByProduct={packs} />)
+    expect(screen.queryByText(/loading 3d view/i)).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("tab", { name: /3d stacks/i }))
+
+    expect(
+      screen.getByRole("img", { name: /3d storage plan: 3 stacks/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/loading 3d view/i)).toBeInTheDocument()
+  })
+
+  it("shows room sizes without float noise", () => {
+    const lines = [line("A", 3, "Milk")]
+    const packs = new Map<string, ProductView | null>([
+      ["A", product("A", sizedPack)],
+    ])
+    render(<StoragePlanner lines={lines} packByProduct={packs} />)
+    expect(screen.getByLabelText("Room width (m)")).toHaveValue(2.4)
+  })
+
+  it("labels small stacks with their pack count and lists heights per product", () => {
+    // 1 L cartons, 7 cm square and 25 cm tall: 7 per 1.8 m stack.
+    const carton = {
+      ...sizedPack,
+      width_mm: 70,
+      length_mm: 70,
+      height_mm: 250,
+    }
+    const lines = [line("A", 18, "Milk")]
+    const packs = new Map<string, ProductView | null>([
+      ["A", product("A", carton)],
+    ])
+    const { container } = render(
+      <StoragePlanner lines={lines} packByProduct={packs} />
+    )
+    const labels = [...container.querySelectorAll("g[role=button] text")].map(
+      (t) => t.textContent
+    )
+    expect(labels).toEqual(["7", "7", "4"])
+    const legend = screen.getByRole("list", { name: /stack heights for milk/i })
+    expect(legend).toHaveTextContent("7 high × 2 stacks")
+    expect(legend).toHaveTextContent("4 high × 1 stack")
+  })
+
   it("explains when no product carries dimensions", () => {
     const lines = [line("A", 3, "Milk")]
-    const packs = new Map<string, ProductView | null>([["A", product("A", null)]])
+    const packs = new Map<string, ProductView | null>([
+      ["A", product("A", null)],
+    ])
     render(<StoragePlanner lines={lines} packByProduct={packs} />)
-    expect(
-      screen.getByText(/cannot be drawn/i)
-    ).toBeInTheDocument()
+    expect(screen.getByText(/cannot be drawn/i)).toBeInTheDocument()
   })
 })

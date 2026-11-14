@@ -63,7 +63,8 @@ export interface PlanSummary {
 }
 
 export const DEFAULT_MAX_STACK_M = 1.8
-const DEFAULT_GAP_M = 0.05
+// Stacks stand flush against each other, as packs are stored in practice.
+const DEFAULT_GAP_M = 0
 const RECOMMENDED_WIDTH_M = 2.4
 
 function packs(line: OrderLine, pack: PackView): number {
