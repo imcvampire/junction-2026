@@ -34,10 +34,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-svh flex-col bg-background text-foreground">
       <header className="border-b">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-          <span className="flex items-center gap-2 font-heading font-semibold">
+          <Link
+            to="/"
+            className="flex items-center gap-2 font-heading font-semibold"
+          >
             <img src="/favicon.svg" alt="" className="size-6" />
             Valio
-          </span>
+          </Link>
           <nav aria-label="Features" className="flex min-w-0 flex-1 gap-1">
             {NAV_ITEMS.map((item) => (
               <Link

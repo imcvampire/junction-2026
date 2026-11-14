@@ -6,9 +6,11 @@ WORKDIR /repo/apps/web
 COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
 
-COPY skills/valio-aimo-purchasing/references /repo/skills/valio-aimo-purchasing/references
+COPY skills/valio-aimo-purchasing /repo/skills/valio-aimo-purchasing
 COPY apps/web ./
-RUN pnpm build
+RUN pnpm build \
+ && mkdir -p dist/skills \
+ && tar -czf dist/skills/valio-aimo-purchasing.tar.gz -C /repo/skills valio-aimo-purchasing
 
 FROM caddy:2-alpine
 COPY deploy/Caddyfile /etc/caddy/Caddyfile

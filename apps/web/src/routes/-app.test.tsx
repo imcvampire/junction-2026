@@ -6,7 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createAppRouter } from "@/router"
 
-test("the start page redirects to the journal viewer", async () => {
+test("the start page shows how to install the MCP server and skill", async () => {
   const router = createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))
   render(
     <ThemeProvider>
@@ -17,7 +17,23 @@ test("the start page redirects to the journal viewer", async () => {
   )
 
   expect(
-    await screen.findByRole("heading", { level: 1, name: "Journal viewer" })
+    await screen.findByRole("heading", {
+      level: 1,
+      name: /buy from Valio Aimo/,
+    })
   ).toBeInTheDocument()
-  expect(router.state.location.pathname).toBe("/journal-viewer")
+  expect(router.state.location.pathname).toBe("/")
+  expect(
+    screen.getByText(/^Set up the Valio Aimo purchasing tools for me/)
+  ).toHaveTextContent("Do not place any orders yet.")
+  expect(
+    screen.getByText(
+      "claude mcp add --transport http --scope user valio-aimo https://95.133.252.52.sslip.io/mcp"
+    )
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText(
+      /^mkdir -p ~\/\.claude\/skills\s+curl .*valio-aimo-purchasing\.tar\.gz/
+    )
+  ).toBeInTheDocument()
 })
