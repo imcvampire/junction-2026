@@ -1,5 +1,6 @@
 import { useRef, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
+import { FileCheckIcon, FileClockIcon } from "lucide-react"
 
 import { JournalPicker } from "@/features/journal-viewer/components/journal-picker"
 import { JournalView } from "@/features/journal-viewer/components/journal-view"
@@ -42,18 +43,32 @@ function JournalViewerPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-heading text-2xl font-semibold">Purchase audit</h1>
-        <p className="text-sm text-muted-foreground">
-          Open a journal file to see what the purchasing agent was asked, what
-          it did, and what it ordered.
-        </p>
+    <div className="flex flex-col gap-6 pb-8">
+      <div className="flex items-start gap-4 py-2">
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
+          <FileClockIcon className="size-6" aria-hidden />
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-heading text-3xl font-semibold tracking-tight">
+            Purchase audit
+          </h1>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Follow every purchase from request to result. Review the agent's
+            choices, buyer decisions and what needs to happen next.
+          </p>
+        </div>
       </div>
-      <JournalPicker onLoad={onLoad} />
+      <JournalPicker onLoad={onLoad} compact={state.status === "loaded"} />
       {state.status === "loaded" ? (
         <>
-          <p role="status" className="text-xs text-muted-foreground">
+          <p
+            role="status"
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <FileCheckIcon
+              className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+              aria-hidden
+            />
             Showing <span className="break-all">{state.fileName}</span>
           </p>
           <JournalView key={state.loadId} journal={state.journal} />

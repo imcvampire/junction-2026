@@ -78,7 +78,8 @@ export function QuestionCard({ question }: { question: Question }) {
           return (
             <li
               key={`${option.label}-${index}`}
-              className="flex flex-col gap-0.5"
+              data-picked={picked || undefined}
+              className="flex flex-col gap-1 rounded-lg border bg-background/60 p-3 data-picked:border-sky-500/40 data-picked:bg-sky-500/10"
             >
               <span className="flex flex-wrap items-center gap-1 font-medium">
                 {option.label}
@@ -88,7 +89,7 @@ export function QuestionCard({ question }: { question: Question }) {
                 ) : null}
               </span>
               {option.description ? (
-                <span className="text-muted-foreground">
+                <span className="text-xs leading-relaxed text-muted-foreground">
                   {option.description}
                 </span>
               ) : null}
@@ -210,7 +211,7 @@ function Detail({
 function StepNode({ step }: { step: AuditStep }) {
   if (step.actor === "buyer") {
     return (
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground ring-4 ring-background">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sky-700 text-white ring-4 ring-card dark:bg-sky-500 dark:text-slate-950">
         <UserIcon className="size-5" aria-hidden />
       </span>
     )
@@ -261,9 +262,12 @@ function Step({
         <div
           className={cn(
             "flex min-w-0 flex-1 flex-col gap-1.5",
-            isBuyer &&
-              "rounded-lg bg-primary/5 p-3 ring-1 ring-primary/30 dark:bg-primary/10",
-            isProblem && "rounded-lg p-3 ring-1 ring-destructive/40"
+            isBuyer && "rounded-xl border border-sky-500/25 bg-sky-500/5 p-4",
+            isProblem &&
+              "rounded-xl border border-destructive/30 bg-destructive/5 p-4",
+            !isBuyer &&
+              !isProblem &&
+              "rounded-xl border border-transparent px-3 py-2 transition-colors hover:border-border hover:bg-muted/30"
           )}
         >
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -279,7 +283,7 @@ function Step({
           </p>
           <p
             className={cn(
-              "text-sm break-words",
+              "text-sm leading-relaxed break-words",
               isBuyer && "text-base font-medium"
             )}
           >
@@ -314,7 +318,7 @@ function Step({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-fit px-0 text-xs text-muted-foreground hover:bg-transparent"
+                    className="w-fit gap-1 rounded-md px-2 text-xs text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
                   >
                     Details
                     <ChevronDownIcon
@@ -348,40 +352,58 @@ export function JournalTimeline({ journal }: { journal: ValioAimoJournal }) {
         <EmptyNote>No steps were recorded.</EmptyNote>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-            <Button
-              variant={onlyHuman ? "default" : "outline"}
-              size="sm"
-              aria-pressed={onlyHuman}
-              onClick={() => setOnlyHuman((value) => !value)}
-            >
-              <UserIcon data-icon="inline-start" />
-              Only human decisions
-            </Button>
-            <span className="flex items-center gap-1.5">
-              <span className="flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                <UserIcon className="size-2.5" aria-hidden />
+          <div className="flex flex-col gap-3 rounded-xl bg-muted/40 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={!onlyHuman ? "default" : "outline"}
+                size="sm"
+                aria-pressed={!onlyHuman}
+                onClick={() => setOnlyHuman(false)}
+              >
+                All steps
+              </Button>
+              <Button
+                variant={onlyHuman ? "default" : "outline"}
+                size="sm"
+                aria-pressed={onlyHuman}
+                onClick={() => setOnlyHuman((value) => !value)}
+              >
+                <UserIcon data-icon="inline-start" />
+                Only human decisions
+              </Button>
+              <span
+                role="status"
+                className="ml-auto text-xs text-muted-foreground"
+              >
+                {shown.length} of {steps.length} steps
               </span>
-              Buyer
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="size-3 rounded-full bg-muted ring-1 ring-border" />
-              Agent
-            </span>
-            <span className="flex items-center gap-1.5">
-              <TriangleAlertIcon
-                className="size-3.5 text-destructive"
-                aria-hidden
-              />
-              Problem
-            </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="flex size-4 items-center justify-center rounded-full bg-sky-700 text-white dark:bg-sky-500 dark:text-slate-950">
+                  <UserIcon className="size-2.5" aria-hidden />
+                </span>
+                Buyer
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-3 rounded-full bg-muted ring-1 ring-border" />
+                Agent
+              </span>
+              <span className="flex items-center gap-1.5">
+                <TriangleAlertIcon
+                  className="size-3.5 text-destructive"
+                  aria-hidden
+                />
+                Problem
+              </span>
+            </div>
           </div>
           {shown.length === 0 ? (
             <EmptyNote>No person was involved in this session.</EmptyNote>
           ) : (
             <ol
               aria-label="Steps"
-              className="relative flex flex-col gap-5 before:absolute before:top-4 before:bottom-4 before:left-[17px] before:w-0.5 before:bg-border"
+              className="relative flex flex-col gap-5 before:absolute before:top-4 before:bottom-4 before:left-[17px] before:w-0.5 before:bg-gradient-to-b before:from-sky-500/40 before:to-border"
             >
               {shown.map((step, index) => (
                 <Step

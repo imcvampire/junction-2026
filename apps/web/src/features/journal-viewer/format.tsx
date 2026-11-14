@@ -1,6 +1,13 @@
 import type { ReactNode } from "react"
+import {
+  ClipboardListIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  ReceiptTextIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 const LOCALE = "en-FI"
 const TIME_ZONE = "Europe/Helsinki"
@@ -172,19 +179,39 @@ export function JournalSection({
   id,
   title,
   children,
+  className,
 }: {
   id: string
   title: string
   children: ReactNode
+  className?: string
 }) {
   const headingId = `journal-section-${id}`
+  const Icon = {
+    input: ClipboardListIcon,
+    timeline: GitBranchIcon,
+    output: ReceiptTextIcon,
+    sources: GlobeIcon,
+  }[id]
   return (
     <section
-      aria-labelledby={headingId}
-      className="flex min-w-0 flex-col gap-3"
+      id={headingId}
+      aria-labelledby={`${headingId}-title`}
+      className={cn(
+        "flex min-w-0 scroll-mt-6 flex-col gap-5 rounded-2xl border bg-card p-5 shadow-sm sm:p-6",
+        className
+      )}
     >
-      <h3 id={headingId} className="font-heading text-lg font-semibold">
-        {title}
+      <h3
+        id={`${headingId}-title`}
+        className="flex items-center gap-3 font-heading text-base font-semibold tracking-tight"
+      >
+        {Icon ? (
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
+            <Icon className="size-4" aria-hidden />
+          </span>
+        ) : null}
+        <span>{title}</span>
       </h3>
       {children}
     </section>
@@ -207,5 +234,19 @@ export function ToneBadge({
 }: {
   label: { text: string; tone: keyof typeof TONE_VARIANT }
 }) {
-  return <Badge variant={TONE_VARIANT[label.tone]}>{label.text}</Badge>
+  return (
+    <Badge
+      variant={TONE_VARIANT[label.tone]}
+      className={cn(
+        "gap-1.5 px-2.5 py-1",
+        label.tone === "positive" &&
+          "border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
+        label.tone === "waiting" &&
+          "border-amber-500/20 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+      )}
+    >
+      <span aria-hidden className="size-1.5 rounded-full bg-current" />
+      {label.text}
+    </Badge>
+  )
 }
