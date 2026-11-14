@@ -5,7 +5,6 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
-from api.agents.models import Role
 from api.catalog.index import ALLERGEN_NAMES, Product
 from api.orders.models import AuditEntry, Order, OrderDecision, OrderLine, OrderStatus
 
@@ -38,10 +37,6 @@ class Principal(BaseModel):
     agent_id: str
     name: str
     customer: str
-    role: Role = Field(description="member: orders for itself; admin: also sees and decides the company's orders")
-    can_approve: bool = Field(
-        description="May approve or reject this customer's pending_approval orders, except ones it placed itself"
-    )
     spend_limit_eur: float = Field(description="Orders above this total (excl. VAT) need human approval")
     spend_limit_source: str
     required_tags: list[str] = Field(description="Every order line must meet these, or the order escalates")

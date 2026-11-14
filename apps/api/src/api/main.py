@@ -7,14 +7,13 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from starlette.routing import Route
-from starlette.types import Receive, Scope, Send
 
 from api.agents.registry import AgentRegistry
 from api.catalog.index import Catalog, load_catalog
 from api.config import Settings, get_settings
-from api.mcp.auth import AgentAuthASGI
-from api.mcp.server import build_mcp_server
+from api.mcp.server import MCP_AGENT_ID, MCP_AGENT_NAME, build_mcp_server
 from api.orders.policy import ApprovalPolicy
 from api.orders.service import OrderError, OrderService
 from api.orders.store import Store
@@ -53,13 +52,14 @@ def create_app(
         valio = ValioClient(http, api_key=api_key, cache_ttl_s=cfg.quote_cache_ttl_s)
         store = Store(cfg.db_path)
         orders = OrderService(store)
+        agents = AgentRegistry(store)
         app.state.services = Services(
             settings=cfg,
             catalog=cat,
             valio=valio,
             store=store,
             orders=orders,
-            agents=AgentRegistry(store),
+            agents=agents,
             procurement=ProcurementService(
                 store,
                 cat,
@@ -69,6 +69,7 @@ def create_app(
                 quote_ttl_s=cfg.quote_ttl_s,
                 quotes_per_minute=cfg.agent_quotes_per_minute,
             ),
+            mcp_agent=agents.keyless(MCP_AGENT_ID, MCP_AGENT_NAME, cfg.valio_customer),
         )
         try:
             async with mcp_server.session_manager.run():
@@ -107,12 +108,7 @@ def create_app(
     for router in (health.router, products.router, orders.router, agent.router):
         app.include_router(router, prefix="/api")
 
-    session_manager = mcp_server.session_manager
-
-    async def mcp_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
-        await session_manager.handle_request(scope, receive, send)
-
-    app.router.routes.append(Route("/mcp", endpoint=AgentAuthASGI(mcp_endpoint)))
+    app.router.routes.append(Route("/mcp", endpoint=StreamableHTTPASGIApp(mcp_server.session_manager)))
     return app
 
 

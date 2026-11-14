@@ -5,23 +5,16 @@ how to use the Valio Aimo MCP server. The server enforces every rule; the skill 
 
 ## Install
 
-1. Get an agent key from your Valio Aimo contact. Operators create one with
-   `mise run agent:create -- --name <name> --customer <customer-id> [--role admin]`, which prints it
-   once. A `member` key (the default) buys; an `admin` key can also approve the company's escalated
-   orders.
-2. Connect the MCP server (Claude Code shown; any MCP host with streamable HTTP and custom headers
-   works):
+1. Connect the MCP server (Claude Code shown; any MCP host with streamable HTTP works). It needs
+   no key: in this proof of concept every agent works for the same company, as one shared agent
+   that can buy and can pass on a human's approval or rejection of the company's escalated orders.
 
    ```sh
-   claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp \
-     --header "Authorization: Bearer $VALIO_AIMO_AGENT_KEY"
+   claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp
    ```
 
-3. Copy this folder into the host's skills directory, for example
+2. Copy this folder into the host's skills directory, for example
    `cp -r skills/valio-aimo-purchasing ~/.claude/skills/` (or `.claude/skills/` in a project).
-
-Keep the key in the host's MCP configuration or an environment variable. Never paste it into a
-prompt or commit it.
 
 ## Files
 

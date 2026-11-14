@@ -23,7 +23,7 @@ dir = "apps/api"
 run = "uv run fastapi dev src/api/main.py --host 127.0.0.1 --port $API_PORT"
 
 [tasks."agent:create"]
-description = "Register a purchasing agent and print its key once (args: --name --customer [--role admin] [--spend-limit] [--require TAG] [--ban CODE])"
+description = "Register a purchasing agent and print its key once (args: --name --customer [--spend-limit] [--require TAG] [--ban CODE])"
 dir = "apps/api"
 run = "uv run python -m api.agents.cli create"
 
@@ -32,13 +32,8 @@ description = "List purchasing agents (never shows keys)"
 dir = "apps/api"
 run = "uv run python -m api.agents.cli list"
 
-[tasks."agent:set-role"]
-description = "Change a purchasing agent's role without reissuing its key (args: <agent_id> member|admin)"
-dir = "apps/api"
-run = "uv run python -m api.agents.cli set-role"
-
 [tasks."skill:sandbox"]
-description = "Set up a directory outside the repo where plain `claude` has the valio-aimo MCP and purchasing skill (needs VALIO_AIMO_AGENT_KEY)"
+description = "Set up a directory outside the repo where plain `claude` has the valio-aimo MCP and purchasing skill"
 file = "scripts/skill-sandbox.sh"
 
 [tasks.check]

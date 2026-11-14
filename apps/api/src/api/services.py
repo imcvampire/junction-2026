@@ -3,6 +3,7 @@ from typing import Annotated, cast
 
 from fastapi import Depends, Request
 
+from api.agents.models import AgentPrincipal
 from api.agents.registry import AgentRegistry
 from api.catalog.index import Catalog
 from api.config import Settings
@@ -21,6 +22,7 @@ class Services:
     orders: OrderService
     agents: AgentRegistry
     procurement: ProcurementService
+    mcp_agent: AgentPrincipal
 
 
 def get_services(request: Request) -> Services:

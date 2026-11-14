@@ -1,5 +1,4 @@
-"""Approval endpoints for the order console. They take an agent key: approving needs an admin key of the
-order's customer, and reads show the caller's own orders or, for an admin, the customer's orders."""
+"""Approval endpoints for the order console. They take an agent key and act on any order of its customer."""
 
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse

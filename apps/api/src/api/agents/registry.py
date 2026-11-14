@@ -9,7 +9,7 @@ import logging
 import secrets
 import uuid
 
-from api.agents.models import ROLES, AgentPrincipal, AgentRecord, Mandate, Role
+from api.agents.models import AgentPrincipal, AgentRecord, Mandate
 from api.orders.models import utcnow
 from api.orders.store import Store
 
@@ -27,14 +27,11 @@ class AgentRegistry:
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    def create(
-        self, name: str, customer: str, mandate: Mandate | None = None, role: Role = "member"
-    ) -> tuple[AgentPrincipal, str]:
+    def create(self, name: str, customer: str, mandate: Mandate | None = None) -> tuple[AgentPrincipal, str]:
         """Register an agent. Returns the plaintext key, which is never stored or shown again."""
         name, customer = name.strip(), customer.strip()
         if not name or not customer:
             raise ValueError("name and customer are required")
-        _check_role(role)
         key = KEY_PREFIX + secrets.token_urlsafe(32)
         principal = AgentPrincipal(
             agent_id=f"agt_{uuid.uuid4().hex[:12]}",
@@ -42,7 +39,6 @@ class AgentRegistry:
             customer=customer,
             mandate=mandate or Mandate(),
             created_at=utcnow(),
-            role=role,
         )
         self._store.insert_agent(
             principal.agent_id,
@@ -51,11 +47,8 @@ class AgentRegistry:
             hash_key(key),
             principal.mandate.model_dump_json(),
             principal.created_at,
-            principal.role,
         )
-        log.info(
-            "agent_created agent_id=%s customer=%s role=%s", principal.agent_id, principal.customer, principal.role
-        )
+        log.info("agent_created agent_id=%s customer=%s", principal.agent_id, principal.customer)
         return principal, key
 
     def resolve(self, key: str) -> AgentPrincipal | None:
@@ -71,28 +64,25 @@ class AgentRegistry:
             return None
         return AgentPrincipal.model_validate(record.model_dump())
 
+    def keyless(self, agent_id: str, name: str, customer: str) -> AgentPrincipal:
+        """A persisted agent without a key, for callers trusted by position (the MCP endpoint).
+
+        Its key_hash is not a SHA-256 hex digest, so `resolve` can never match it.
+        """
+        self._store.upsert_keyless_agent(agent_id, name, customer, Mandate().model_dump_json(), utcnow())
+        row = self._store.agent_by_id(agent_id)
+        assert row is not None
+        return AgentPrincipal.model_validate(_record(row).model_dump())
+
     def list(self) -> list[AgentRecord]:
         return [_record(r) for r in self._store.list_agents()]
 
     def set_disabled(self, agent_id: str, disabled: bool = True) -> bool:
         return self._store.set_agent_disabled(agent_id, disabled)
 
-    def set_role(self, agent_id: str, role: Role) -> bool:
-        """Promote or demote a key without reissuing it. Takes effect on the key's next request."""
-        _check_role(role)
-        changed = self._store.set_agent_role(agent_id, role)
-        if changed:
-            log.info("agent_role_set agent_id=%s role=%s", agent_id, role)
-        return changed
-
-
-def _check_role(role: str) -> None:
-    if role not in ROLES:
-        raise ValueError(f"role must be one of {', '.join(ROLES)}")
-
 
 def _record(row: tuple[object, ...]) -> AgentRecord:
-    agent_id, name, customer, mandate, created_at, disabled, role = row
+    agent_id, name, customer, mandate, created_at, disabled = row
     return AgentRecord(
         agent_id=str(agent_id),
         name=str(name),
@@ -100,5 +90,4 @@ def _record(row: tuple[object, ...]) -> AgentRecord:
         mandate=Mandate.model_validate_json(str(mandate)),
         created_at=str(created_at),  # pyright: ignore[reportArgumentType]
         disabled=bool(disabled),
-        role=str(role),  # pyright: ignore[reportArgumentType]
     )

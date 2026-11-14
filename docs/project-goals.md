@@ -43,7 +43,7 @@ it, and preview in AR how the order would be picked in the warehouse.
 | # | Goal |
 |---|------|
 | B1 | Wrap the Valio Aimo challenge APIs (product data, price, availability, delivery reliability, carbon footprint); never call price or availability for the whole catalog. |
-| B2 | Enforce permission and human-approval rules server-side: an order above the spend threshold, or with a line that breaks the buyer's stated requirements, becomes *pending approval* instead of being placed. |
+| B2 | Enforce permission and human-approval rules server-side: an order above the spend limit becomes *pending approval* instead of being placed, and a line that breaks the agent's mandate (required tags, banned allergens) is refused. A line that misses only the buyer's own stated preferences is the buyer's choice and is placed, with the miss recorded. |
 | B3 | Let a human approve or reject a pending order, and let the agent see the outcome. |
 | B4 | Keep a human-readable audit trail for every order: which agent, the request, options considered, the choice, the reason, and every status change. |
 | B5 | Store a complete order record: the original request as the agent sent it, the requirements it declared, the quote (prices and availability it was placed against), the ordered lines in sales units, every substitution (original product, substitute, reason, and whether it stays within the stated requirements), the approval decision with who decided and why, and the order's chat messages. |
@@ -53,7 +53,7 @@ it, and preview in AR how the order would be picked in the warehouse.
 | # | Goal |
 |---|------|
 | F1 | Monitor orders placed by agents: a list filterable by status, agent and customer, and an order detail view that shows the B5 record and the B4 audit trail. |
-| F2 | Approve or reject orders that hit a limit (spend threshold or a line outside the stated requirements) from the console, showing why the order escalated and recording the decision and its reason. |
+| F2 | Approve or reject orders over the spend limit from the console, showing why the order escalated and recording the decision and its reason. |
 | F3 | Show in AR how the order would be picked in the warehouse: where each line sits (for example by temperature zone), the pick sequence, and the volume of the cases, built from catalog data. |
 | F4 | Give each order a chat thread to discuss it — for example why a substitute was chosen or what to change before approval — stored with the order and visible in its history. |
 
@@ -65,7 +65,7 @@ it, and preview in AR how the order would be picked in the warehouse.
 | Inquiry → order at fixed price | A3 |
 | Permission & human-approval management | B2, B3, A4, F2 |
 | Optional: delivery reliability & sustainability | A2 |
-| Optional: substitution and exception handling | S1, B2 (substitutes outside stated requirements escalate), B5 |
+| Optional: substitution and exception handling | S1, B2 (substitutes that break the mandate are refused; others are the buyer's choice), B5 |
 | Optional: traceability / explainability | B4, B5, F1, F4 |
 
 ## Decisions
@@ -79,10 +79,14 @@ it, and preview in AR how the order would be picked in the warehouse.
   (default 15 minutes). It is not signed; a signature only matters to a third-party verifier and
   can be added later without changing the tool contract.
 - **Agent credentials:** opaque bearer keys stored only as SHA-256 hashes, issued with
-  `mise run agent:create`. OAuth 2.1 is the production path.
-- **Approval access:** agent keys are `member` or `admin`. Only an admin key of the order's customer
-  may approve or reject it, never an order that key placed itself, over MCP, `/api/agent/v1` or the
-  console's `/api/orders` routes. The deciding key is recorded on the order and in the audit.
+  `mise run agent:create`, for the REST API. The MCP endpoint is unauthenticated for the PoC: all
+  agents work for the same company (`API_VALIO_CUSTOMER`) as one shared agent. OAuth 2.1 is the
+  production path.
+- **Approval access:** there are no roles. The buyer approves or rejects an escalated order through
+  the agent interface: the shared MCP agent, or any agent key of the order's customer over
+  `/api/agent/v1` or the console's `/api/orders` routes, may decide it on the human's instruction,
+  the placing agent included. The deciding agent is recorded on the order and in the audit. The server cannot prove a human said
+  yes; that is accepted for the demo.
 - **Interaction model:** the customer brings the agent. Our in-house LLM agent and voice work is
   not part of the product (the mobile frontend has been removed). The only frontend is the order
   console (F1–F4), which is for oversight and approval; no order is created from it.
@@ -118,7 +122,7 @@ it, and preview in AR how the order would be picked in the warehouse.
    options considered, the choice, and the reason.
 7. Every order record holds the original request, the declared requirements, the quoted prices,
    and every substitution with its reason, and the order console shows all of it.
-8. An order that hits a limit appears in the order console as pending approval with the reason;
+8. An order over the spend limit appears in the order console as pending approval with the reason;
    approving or rejecting it there changes the status the agent reads back.
 9. The order console shows an AR view of how an order's lines would be picked in the warehouse.
 10. A message posted in an order's chat is stored with that order and shown in its history.
@@ -146,8 +150,8 @@ The product owner may still provide a flow diagram that refines these steps.
 2. Voice and conversation endpoints are gone. Can the removed AR code (`orders/gltf.py`,
    `orders/footprint.py`) be reused for F3, or should the AR view be rebuilt on the frontend?
 3. Who uses the order console: the customer's own approvers, Valio Aimo staff, or both? This
-   decides which orders each user sees. Until it is answered, the console authenticates with an
-   admin agent key and sees that customer's orders.
+   decides which orders each user sees. Until it is answered, the console authenticates with any
+   agent key and sees that customer's orders.
 4. Who takes part in an order's chat: only humans, or can the purchasing agent read and reply
    through MCP (for example to explain a substitution)?
 5. Which device does the AR view target: phone or tablet AR (WebXR), with a 3D browser view as

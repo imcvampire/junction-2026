@@ -30,11 +30,7 @@ async def idempotent[M: BaseModel](
 async def idempotent_decision(
     svc: Services, agent: AgentPrincipal, order_id: str, *, approve: bool, reason: str, key: str | None
 ) -> OrderView:
-    """Approve or reject; a repeated key from the same agent replays the first response.
-
-    The role is checked before the replay, so a key demoted since its first call is refused.
-    """
-    svc.procurement.require_admin(agent, "approve" if approve else "reject")
+    """Approve or reject; a repeated key from the same agent replays the first response."""
     return await idempotent(
         svc.store,
         f"{'approve' if approve else 'reject'}:{agent.agent_id}:{order_id}",

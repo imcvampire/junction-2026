@@ -67,31 +67,27 @@ The response has `status: pending_approval` and the reason
 
 > I found Valio skimmed milk 1 l lactose free UHT (464119): 100 cases of 10 L, which is 1,000 L,
 > at 15.40 EUR per case, 1,540.00 EUR excl. VAT, available for Monday 16 November. It is the
-> cheapest option that covers the full amount. The order (ord_…) is waiting for approval because it
-> is above my 500 EUR limit. I will check its status.
+> cheapest option that covers the full amount. The order (ord_…) needs your approval because it is
+> above my 500 EUR limit.
 
-Later, `get_order` returns `approved` with the approver's reason and `decision.decided_by`, and
-you tell the buyer it is confirmed and by whom.
+## 6. The buyer decides
 
-## 6. The admin's side
-
-The kitchen manager's agent holds an admin key for the same customer. It calls
-`list_pending_approvals` and shows the manager the order: 1,540.00 EUR, the spend-limit reason, the
-chosen product and the agent that placed it. The manager says "approve it, it is for the gala
-dinner". Only then does the agent call:
+Ask straight away with `AskUserQuestion` (`Approve (Recommended)`, `Reject`), and take the reason
+from the free-text answer. The buyer answers "approve it, it is
+for the gala dinner". Only then call:
 
 ```json
 {"order_id": "ord_…", "reason": "For the gala dinner"}
 ```
 
-on `approve_order`, and reports `approved` with `decided_by` naming its own key.
+on `approve_order`, and report `approved` with `decided_by` naming your own agent.
 
 ## If the price moves
 
 If `place_order` returns `quote_changed` with
 `details.changes = [{"problem": "price_changed", "was": 15.4, "now": 16.0}]`, no order was created.
-Quote again, check that the ranking still holds, and tell the buyer about the new total before you
-place the order.
+Quote again, check that the ranking still holds, and ask the buyer with a dialog whether to order
+at the new total before you place it.
 
 ## When the buyer must choose
 
@@ -110,7 +106,7 @@ Show the table first (figures illustrative):
 | D | Arla 10 L Novobox semi-skimmed lactose free ESL (464179) | 31 × 10 L = 310 L | €2.72/L | €843.82 | Same deadline issue as B. |
 
 > I recommend A: it keeps the same 1 L UHT format and costs a little less per litre than the Café
-> milk. Every option is over the €500 limit, so any of them needs admin approval.
+> milk. Every option is over the €500 limit, so any of them needs your approval.
 
 Then call `AskUserQuestion`:
 

@@ -46,8 +46,7 @@ CREATE TABLE IF NOT EXISTS agents (
     key_hash TEXT NOT NULL UNIQUE,
     mandate TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    disabled INTEGER NOT NULL DEFAULT 0,
-    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin'))
+    disabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS quotes (
     id TEXT PRIMARY KEY,
@@ -88,11 +87,6 @@ class Store:
             for table in ("orders", "audit"):
                 if "agent_id" not in _columns(c, table):
                     c.execute(f"ALTER TABLE {table} ADD COLUMN agent_id TEXT")
-            if "role" not in _columns(c, "agents"):
-                c.execute(
-                    "ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'member' "
-                    "CHECK (role IN ('member', 'admin'))"
-                )
             if "customer" not in _columns(c, "orders"):
                 c.execute("ALTER TABLE orders ADD COLUMN customer TEXT")
             c.execute("UPDATE orders SET customer = json_extract(data, '$.customer') WHERE customer IS NULL")
@@ -234,26 +228,39 @@ class Store:
         key_hash: str,
         mandate: str,
         created_at: datetime,
-        role: str = "member",
     ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO agents(id, name, customer, key_hash, mandate, created_at, role) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (agent_id, name, customer, key_hash, mandate, created_at.isoformat(), role),
+                "INSERT INTO agents(id, name, customer, key_hash, mandate, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (agent_id, name, customer, key_hash, mandate, created_at.isoformat()),
             )
+
+    def upsert_keyless_agent(self, agent_id: str, name: str, customer: str, mandate: str, created_at: datetime) -> None:
+        """Insert or rename/rehome a keyless agent, keeping its mandate and disabled flag."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agents(id, name, customer, key_hash, mandate, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, customer = excluded.customer",
+                (agent_id, name, customer, f"keyless:{agent_id}", mandate, created_at.isoformat()),
+            )
+
+    def agent_by_id(self, agent_id: str) -> tuple[Any, ...] | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT id, name, customer, mandate, created_at, disabled FROM agents WHERE id = ?", (agent_id,)
+            ).fetchone()
 
     def agent_by_key_hash(self, key_hash: str) -> tuple[Any, ...] | None:
         with self._lock:
             return self._conn.execute(
-                "SELECT id, name, customer, mandate, created_at, disabled, role FROM agents WHERE key_hash = ?",
+                "SELECT id, name, customer, mandate, created_at, disabled FROM agents WHERE key_hash = ?",
                 (key_hash,),
             ).fetchone()
 
     def list_agents(self) -> list[tuple[Any, ...]]:
         with self._lock:
             return self._conn.execute(
-                "SELECT id, name, customer, mandate, created_at, disabled, role FROM agents ORDER BY created_at"
+                "SELECT id, name, customer, mandate, created_at, disabled FROM agents ORDER BY created_at"
             ).fetchall()
 
     def set_agent_disabled(self, agent_id: str, disabled: bool) -> bool:
@@ -262,10 +269,6 @@ class Store:
                 self._conn.execute("UPDATE agents SET disabled = ? WHERE id = ?", (int(disabled), agent_id)).rowcount
                 == 1
             )
-
-    def set_agent_role(self, agent_id: str, role: str) -> bool:
-        with self._lock:
-            return self._conn.execute("UPDATE agents SET role = ? WHERE id = ?", (role, agent_id)).rowcount == 1
 
     def save_quote(self, quote_id: str, agent_id: str, data: str, expires_at: datetime) -> None:
         with self._lock:

@@ -68,5 +68,5 @@ Rules for using the data:
 
 Tasks are defined in `mise.toml`: `mise run install`, `mise run dev` (API on port
 8000, MCP at `/mcp`), `mise run check` (lint, typecheck and test), `mise run fmt`, and
-`mise run agent:create -- --name <name> --customer <id> [--role admin]` (prints a new agent key once). For focused API tests,
+`mise run agent:create -- --name <name> --customer <id>` (prints a new agent key once). For focused API tests,
 run `uv run pytest tests/test_<area>.py` inside `apps/api`.

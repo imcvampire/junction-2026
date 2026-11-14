@@ -43,25 +43,22 @@ def test_unknown_malformed_and_disabled_keys_resolve_to_nothing(tmp_path: Path) 
     assert registry.resolve(key) is not None
 
 
-def test_role_defaults_to_member_and_admin_persists(tmp_path: Path) -> None:
-    registry = AgentRegistry(Store(tmp_path / "a.sqlite3"))
-    member, member_key = registry.create("buyer", "cust-1")
-    admin, admin_key = registry.create("ops", "cust-1", role="admin")
-
-    assert member.role == "member" and not member.is_admin
-    resolved = registry.resolve(admin_key)
-    assert resolved is not None and resolved.role == "admin" and resolved.is_admin
-    assert {r.agent_id: r.role for r in registry.list()} == {member.agent_id: "member", admin.agent_id: "admin"}
-    with pytest.raises(ValueError):
-        registry.create("x", "cust-1", role="owner")  # pyright: ignore[reportArgumentType]
-
-    assert registry.set_role(member.agent_id, "admin")
-    promoted = registry.resolve(member_key)
-    assert promoted is not None and promoted.role == "admin"
-    assert not registry.set_role("agt_nope", "admin")
+def test_database_with_the_retired_role_column_still_registers_agents(tmp_path: Path) -> None:
+    db = tmp_path / "roles.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, customer TEXT NOT NULL, "
+            "key_hash TEXT NOT NULL UNIQUE, mandate TEXT NOT NULL, created_at TEXT NOT NULL, "
+            "disabled INTEGER NOT NULL DEFAULT 0, "
+            "role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')))"
+        )
+    registry = AgentRegistry(Store(db))
+    principal, key = registry.create("buyer", "cust-1")
+    resolved = registry.resolve(key)
+    assert resolved is not None and resolved.agent_id == principal.agent_id
 
 
-def test_database_without_role_or_order_customer_columns_is_migrated(tmp_path: Path) -> None:
+def test_database_without_order_customer_column_is_migrated(tmp_path: Path) -> None:
     db = tmp_path / "old.sqlite3"
     conn = sqlite3.connect(db)
     conn.executescript(
@@ -89,27 +86,24 @@ def test_database_without_role_or_order_customer_columns_is_migrated(tmp_path: P
         raw.execute("UPDATE orders SET customer = NULL")
     store = Store(db)
     resolved = AgentRegistry(store).resolve(key)
-    assert resolved is not None and resolved.role == "member"
+    assert resolved is not None and resolved.agent_id == "agt_old"
     with store.transaction() as c:
         assert c.execute("SELECT customer FROM orders WHERE id = 'ord_old'").fetchone() == ("cust-1",)
-        with pytest.raises(sqlite3.IntegrityError):
-            c.execute("UPDATE agents SET role = 'owner'")
 
 
-def test_cli_creates_admin_key_and_sets_roles(
+def test_cli_creates_and_lists_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("API_DB_PATH", str(tmp_path / "cli.sqlite3"))
     get_settings.cache_clear()
     try:
-        assert cli.main(["create", "--name", "ops", "--customer", "cust-1", "--role", "admin"]) == 0
+        assert cli.main(["create", "--name", "ops", "--customer", "cust-1"]) == 0
         created = json.loads(capsys.readouterr().out)
-        assert created["role"] == "admin" and created["key"].startswith("vaa_")
+        assert created["customer"] == "cust-1" and created["key"].startswith("vaa_")
 
-        assert cli.main(["set-role", created["agent_id"], "member"]) == 0
-        assert cli.main(["set-role", "agt_nope", "admin"]) == 1
+        assert cli.main(["disable", "agt_nope"]) == 1
         assert cli.main(["list"]) == 0
         listed = capsys.readouterr().out
-        assert '"role": "member"' in listed and created["key"] not in listed
+        assert created["agent_id"] in listed and created["key"] not in listed
     finally:
         get_settings.cache_clear()

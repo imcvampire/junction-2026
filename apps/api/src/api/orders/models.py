@@ -4,8 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from api.agents.models import Role
-
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -42,14 +40,15 @@ class OrderLine(BaseModel):
 class DecidedBy(BaseModel):
     agent_id: str
     name: str
-    role: Role
 
 
 class OrderDecision(BaseModel):
     approved: bool
     reason: str
     at: datetime
-    decided_by: DecidedBy | None = Field(default=None, description="The admin key that decided; unset on older orders")
+    decided_by: DecidedBy | None = Field(
+        default=None, description="The agent key the human decided through; unset on older orders"
+    )
 
 
 class Order(BaseModel):

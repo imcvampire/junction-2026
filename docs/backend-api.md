@@ -34,27 +34,31 @@ Missing Valio settings do not stop startup. Quote and order calls then fail with
 
 ```sh
 mise run agent:create -- --name hotel-demo --customer <customer-id> \
-  [--role admin] [--spend-limit 300] [--require LACTOSE_FREE] [--ban AM]
+  [--spend-limit 300] [--require LACTOSE_FREE] [--ban AM]
 mise run agent:list
-mise run agent:set-role -- <agent_id> admin|member
 ```
 
 `agent:create` prints the key (`vaa_…`) once; only its SHA-256 hash is stored. Disable a key with
 `uv run python -m api.agents.cli disable <agent_id>` in `apps/api`.
 
-Every MCP, `/api/agent/v1` and `/api/orders` request needs `Authorization: Bearer <key>`. A missing,
+Every `/api/agent/v1` and `/api/orders` request needs `Authorization: Bearer <key>`. A missing,
 unknown or disabled key gets `401` with `WWW-Authenticate: Bearer`.
 
-Each key has a **role**, stored server-side and read on every request (never from the token):
+The MCP endpoint takes no key. As a proof of concept every agent works for the same company, so every
+MCP client acts as one shared agent, `agt_mcp` (`mcp-agent`), of `API_VALIO_CUSTOMER`. The server
+creates that agent at startup and moves it to the configured customer if the setting changes; it has
+no key, so it is unusable over REST. Its mandate is the default one (global spend threshold). MCP
+clients therefore share quotes, `client_reference` values and "my" orders. Only the DNS-rebinding
+host and origin allowlist (`API_MCP_ALLOWED_HOSTS`, `API_MCP_ALLOWED_ORIGINS`) guards `/mcp`.
 
-| Role | Can do |
-|---|---|
-| `member` (default) | Search, quote, place orders, read its own quotes, orders and audit trails. |
-| `admin` | Everything a member can, plus read any order of its customer, list the customer's pending approvals, and approve or reject them. Never an order it placed itself. |
+All keys have the same rights. A key can search, quote and place orders, read and audit any order of
+its customer, list the customer's pending approvals, and approve or reject them, including orders it
+placed itself. That last right is how the buyer's decision reaches the server: the agent shows the
+buyer why the order escalated and passes on the buyer's answer.
 
-Another agent's quotes and orders answer `404`, as does any order of another customer, so ids cannot
-be probed. A member calling an admin operation gets `403 forbidden`. Existing keys became members
-when the `role` column was added. A role change takes effect on the key's next request.
+Quotes stay with the agent that requested them. Another agent's quote answers `404`, as does any
+order of another customer, so ids cannot be probed. Databases created while keys had a `role` column
+keep the column; the server no longer reads it.
 
 The **mandate** sets what an agent may do alone: `spend_limit_eur` (default: the global threshold),
 `required_tags` and `banned_allergens`. Mandate tags are added to every quote's requirements.
@@ -62,32 +66,30 @@ The **mandate** sets what an agent may do alone: `spend_limit_eur` (default: the
 Connect Claude Code:
 
 ```sh
-claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp \
-  --header "Authorization: Bearer $VALIO_AIMO_AGENT_KEY"
+claude mcp add --transport http valio-aimo http://127.0.0.1:8000/mcp
 ```
 
 ## Operations
 
 | MCP tool | REST | Purpose |
 |---|---|---|
-| `whoami` | `GET /api/agent/v1/me` | Identity, customer, `role`, `can_approve`, spend limit and mandate |
+| `whoami` | `GET /api/agent/v1/me` | Identity, customer, spend limit and mandate |
 | `search_products` | `GET /api/agent/v1/products?q=&tag=&exclude_allergen=&category=&lang=&limit=` | Static catalog search, no prices, at most 20 results |
 | `get_product` | `GET /api/agent/v1/products/{id}` | Full product view |
 | `quote` | `POST /api/agent/v1/quotes` | Live price and availability for at most 12 products; stored, expiring |
 | — | `GET /api/agent/v1/quotes/{id}` | Re-read a stored quote |
 | `place_order` | `POST /api/agent/v1/orders` | Order from a quote at its prices |
 | `get_order` | `GET /api/agent/v1/orders/{id}` | Status, lines, approval reasons, decision with `decided_by` |
-| `list_orders` | `GET /api/agent/v1/orders?status=&limit=&scope=mine\|company` | The agent's own orders; `company` (admin) lists the customer's |
+| `list_orders` | `GET /api/agent/v1/orders?status=&limit=&scope=mine\|company` | The agent's own orders; `company` lists the customer's |
 | `get_order_audit` | `GET /api/agent/v1/orders/{id}/audit`, `/audit.txt` | Audit trail as JSON and text |
-| `list_pending_approvals` | `GET /api/agent/v1/approvals?limit=` | Admin: the customer's `pending_approval` orders, oldest first |
-| `approve_order` | `POST /api/agent/v1/orders/{id}/approve` `{reason}` | Admin: approve (idempotent with `Idempotency-Key`) |
-| `reject_order` | `POST /api/agent/v1/orders/{id}/reject` `{reason}` | Admin: reject (idempotent with `Idempotency-Key`) |
+| `list_pending_approvals` | `GET /api/agent/v1/approvals?limit=` | The customer's `pending_approval` orders, oldest first |
+| `approve_order` | `POST /api/agent/v1/orders/{id}/approve` `{reason}` | Approve on the buyer's instruction (idempotent with `Idempotency-Key`) |
+| `reject_order` | `POST /api/agent/v1/orders/{id}/reject` `{reason}` | Reject on the buyer's instruction (idempotent with `Idempotency-Key`) |
 
 MCP tools return `structuredContent` that matches their `outputSchema`, plus a text block holding a
 one-line summary followed by the same JSON. Read tools are annotated `readOnlyHint`; `place_order`
 is `idempotentHint` because of `client_reference`. `approve_order` and `reject_order` are
-`destructiveHint`, so hosts such as Claude Code ask before calling them. The three admin tools are
-left out of a member key's `tools/list`; the service refuses them anyway.
+`destructiveHint`, so hosts such as Claude Code ask before calling them. Every caller sees all tools.
 
 ### Quote
 
@@ -129,8 +131,6 @@ tool result with `isError: true`, including argument-schema errors (`invalid_arg
 | `invalid_arguments` | 422 | Schema validation failed (MCP); REST returns FastAPI's own 422 body |
 | `invalid_date`, `unknown_product`, `duplicate_product`, `line_not_in_quote`, `invalid_quantity`, `idempotency_key_mismatch` | 422 | Bad request content |
 | `reason_required` | 422 | A decision with an empty reason |
-| `forbidden` | 403 | Member key calling an admin operation |
-| `self_approval_forbidden` | 403 | Admin deciding an order its own key placed |
 | `product_not_found`, `quote_not_found`, `order_not_found` | 404 | Missing, or not visible to this key (another agent's or another customer's) |
 | `quote_expired`, `quote_already_used`, `quote_changed`, `not_deliverable`, `client_reference_reused`, `invalid_state` | 409 | Refused by the rules; nothing was created |
 | `rate_limited` | 429 | Agent quote budget used; `details.retry_after_s` |
@@ -146,18 +146,18 @@ Approval is required when an order's total exceeds the agent's spend limit, or w
 one of the quote's requirements (for example a substitute that is not lactose-free). The reason names
 the limit and its source (`agent mandate` or `global threshold`) or the missing tags.
 
-Only an admin key of the order's customer can decide, never on an order its own key placed, and
-always with a non-empty reason (`{}` or `"reason": ""` gives 422; before roles, the console accepted an
-empty reason). A replayed `Idempotency-Key` is refused once the key is no longer an admin. Approval flow: a member places an order that escalates, an admin
-calls `list_pending_approvals` and then `approve_order` or `reject_order`, and the member reads the
-decision and `decision.decided_by` back through `get_order`.
+Any key of the order's customer can decide, always with a non-empty reason (`{}` or `"reason": ""`
+gives 422). Approval flow, as in [`flow.md`](flow.md): the agent places an order that escalates, tells
+the buyer the `approval_reasons`, and calls `approve_order` or `reject_order` with the buyer's
+decision and reason. Any agent of the customer reads the result and `decision.decided_by` back
+through `get_order`.
 
 Order console endpoints, outside `/agent/v1`. They take the same bearer key and the same service
-rules as the admin tools:
+rules as the decision tools:
 
 | Method and path | Purpose |
 |---|---|
-| `POST /api/orders/{id}/approve`, `/reject` `{reason}` | Admin: decide a `pending_approval` order (idempotent with `Idempotency-Key`) |
+| `POST /api/orders/{id}/approve`, `/reject` `{reason}` | Decide a `pending_approval` order (idempotent with `Idempotency-Key`) |
 | `GET /api/orders/{id}`, `/audit`, `/audit.txt` | Read an order visible to the key, and its trail |
 | `GET /api/products?q=&tag=` | Public static catalog search |
 | `GET /api/health` | Liveness |
@@ -167,19 +167,20 @@ rules as the admin tools:
 Each order's first entry records the agent id and name, the request text, the frozen requirements,
 every option the server quoted (with price, coverage and requirement checks), the chosen lines, the
 agent's reason, approval reasons and the spend limit applied. Decisions add an entry with actor
-`approver`, the deciding key's `agent_id`, `details.decided_by` (`agent_id`, `name`, `role`) and the
+`approver`, the deciding key's `agent_id`, `details.decided_by` (`agent_id`, `name`) and the
 reason. `audit.txt` renders this as plain text.
 
 ## Known demo limitations
 
 These are accepted product decisions for the hackathon demo, not oversights.
 
-- A decision is made by an admin **key**. The skill tells the admin's agent to decide only on the
-  human's explicit instruction, and the tools are annotated `destructiveHint` so hosts ask first,
-  but the server cannot prove a human said yes. The audit shows which key decided.
-- A company with a single admin key cannot decide that admin's own escalated orders; it needs a
-  second admin key.
+- A decision is made through an agent **key**, and that can be the key that placed the order. The
+  skill tells the agent to decide only on the buyer's explicit instruction, and the tools are
+  annotated `destructiveHint` so hosts ask first, but the server cannot prove a human said yes. An
+  agent that ignores the skill can approve its own escalation. The audit shows which key decided.
 - The spend limit applies to each order on its own. An agent can split a purchase across several
   quotes and orders under the limit.
-- Agent keys are static bearer tokens rather than OAuth 2.1.
+- Agent keys are static bearer tokens rather than OAuth 2.1, and `/mcp` has no authentication at
+  all: anyone who can reach it can quote, order and decide escalations as the shared agent. Keep
+  it on localhost or a trusted network.
 - The per-agent quote budget is held in memory, so it resets on restart and is per process.

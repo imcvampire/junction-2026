@@ -44,8 +44,8 @@ class Env:
     def other_agent(self, **mandate: Any) -> AgentPrincipal:
         return self.registry.create("other", "cust-2", Mandate(**mandate))[0]
 
-    def admin(self, customer: str = "hotel-1", name: str = "ops") -> AgentPrincipal:
-        return self.registry.create(name, customer, role="admin")[0]
+    def colleague(self, customer: str = "hotel-1", name: str = "ops") -> AgentPrincipal:
+        return self.registry.create(name, customer)[0]
 
     async def quote(
         self,
@@ -159,12 +159,12 @@ def test_above_limit_escalates_and_agent_reads_the_decision(
         order = await env.place(q, [("464119", 100)])
         assert order.status == OrderStatus.PENDING_APPROVAL
         assert order.approval_reasons == ["Total 1540.00 EUR exceeds the 500.00 EUR spend limit (global threshold)"]
-        admin = env.admin()
-        await env.svc.decide(admin, order.order_id, approve=True, reason="gala dinner")
+        ops = env.colleague()
+        await env.svc.decide(ops, order.order_id, approve=True, reason="gala dinner")
         seen = env.svc.get_order(env.agent, order.order_id)
         assert seen.status == OrderStatus.APPROVED
         assert seen.decision is not None and seen.decision.reason == "gala dinner"
-        assert seen.decision.decided_by is not None and seen.decision.decided_by.agent_id == admin.agent_id
+        assert seen.decision.decided_by is not None and seen.decision.decided_by.agent_id == ops.agent_id
 
     run(tmp_path, catalog, fake_valio, body)
 
@@ -297,8 +297,8 @@ def test_audit_records_agent_request_options_choice_and_reason(
     async def body(env: Env) -> None:
         q = await env.quote(items(("462775", 300), ("464073", 300)), requirements=["LACTOSE_FREE"])
         order = await env.place(q, [("464073", 300)])
-        admin = env.admin()
-        await env.svc.decide(admin, order.order_id, approve=False, reason="too much")
+        ops = env.colleague()
+        await env.svc.decide(ops, order.order_id, approve=False, reason="too much")
 
         audit = env.svc.audit(env.agent, order.order_id)
         first = audit.entries[0]
@@ -315,7 +315,7 @@ def test_audit_records_agent_request_options_choice_and_reason(
             "choice: 300 ST 464073",
             "reason: Cheapest",
             "spend limit",
-            f"approver · rejected: Rejected by ops ({admin.agent_id}): too much",
+            f"approver · rejected: Rejected by ops ({ops.agent_id}): too much",
         ):
             assert expected in audit.text, expected
 
@@ -425,29 +425,7 @@ async def escalated(env: Env, ref: str = "big", agent: AgentPrincipal | None = N
     return order
 
 
-def test_members_cannot_decide_or_see_company_orders(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
-    async def body(env: Env) -> None:
-        order = await escalated(env)
-        colleague = env.registry.create("colleague", "hotel-1")[0]
-        e = await refused("forbidden", env.svc.decide(colleague, order.order_id, approve=True, reason="ok"))
-        assert e.status == 403
-        for call in (
-            lambda: env.svc.list_orders(colleague, scope="company"),
-            lambda: env.svc.list_pending_approvals(colleague),
-        ):
-            with pytest.raises(OrderError) as denied:
-                call()
-            assert denied.value.code == "forbidden" and denied.value.status == 403
-        with pytest.raises(OrderError) as hidden:
-            env.svc.get_order(colleague, order.order_id)
-        assert hidden.value.status == 404
-        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PENDING_APPROVAL
-        assert env.svc.whoami(colleague).role == "member" and not env.svc.whoami(colleague).can_approve
-
-    run(tmp_path, catalog, fake_valio, body)
-
-
-def test_admin_sees_the_company_queue_and_decides_with_identity(
+def test_any_key_of_the_customer_sees_and_decides_its_orders(
     tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
 ) -> None:
     async def body(env: Env) -> None:
@@ -457,52 +435,57 @@ def test_admin_sees_the_company_queue_and_decides_with_identity(
         await escalated(env, "foreign", agent=env.other_agent())
         small = await env.place(await env.quote(items(("462775", 10))), [("462775", 10)], "small")
 
-        admin = env.admin()
-        me = env.svc.whoami(admin)
-        assert me.role == "admin" and me.can_approve
-        queue = env.svc.list_pending_approvals(admin)
+        ops = env.colleague()
+        queue = env.svc.list_pending_approvals(ops)
         assert [o.order_id for o in queue.orders] == [first.order_id, second.order_id]
-        company = env.svc.list_orders(admin, scope="company")
+        company = env.svc.list_orders(ops, scope="company")
         assert {o.order_id for o in company.orders} == {first.order_id, second.order_id, small.order_id}
-        assert env.svc.list_orders(admin).orders == []
-        assert env.svc.get_order(admin, first.order_id).agent_id == env.agent.agent_id
-        assert env.svc.audit(admin, first.order_id).entries[0].action == "escalated"
+        assert env.svc.list_orders(ops).orders == []
+        assert env.svc.get_order(ops, first.order_id).agent_id == env.agent.agent_id
+        assert env.svc.audit(ops, first.order_id).entries[0].action == "escalated"
 
-        rejected = await env.svc.decide(admin, second.order_id, approve=False, reason="  over budget  ")
+        rejected = await env.svc.decide(ops, second.order_id, approve=False, reason="  over budget  ")
         assert rejected.status == OrderStatus.REJECTED
         assert rejected.decision is not None and rejected.decision.reason == "over budget"
         entry = env.svc.audit(env.agent, second.order_id).entries[-1]
-        assert entry.actor == "approver" and entry.agent_id == admin.agent_id
-        assert entry.details["decided_by"] == {"agent_id": admin.agent_id, "name": "ops", "role": "admin"}
+        assert entry.actor == "approver" and entry.agent_id == ops.agent_id
+        assert entry.details["decided_by"] == {"agent_id": ops.agent_id, "name": "ops"}
 
-        approved = await env.svc.decide(admin, first.order_id, approve=True, reason="gala")
-        again = await env.svc.decide(admin, first.order_id, approve=True, reason="gala")
-        assert again == approved and len(env.svc.audit(admin, first.order_id).entries) == 2
-        assert [o.order_id for o in env.svc.list_pending_approvals(admin).orders] == []
+        approved = await env.svc.decide(ops, first.order_id, approve=True, reason="gala")
+        again = await env.svc.decide(ops, first.order_id, approve=True, reason="gala")
+        assert again == approved and len(env.svc.audit(ops, first.order_id).entries) == 2
+        assert [o.order_id for o in env.svc.list_pending_approvals(ops).orders] == []
 
-        await refused("invalid_state", env.svc.decide(admin, small.order_id, approve=True, reason="x"))
+        await refused("invalid_state", env.svc.decide(ops, small.order_id, approve=True, reason="x"))
 
     run(tmp_path, catalog, fake_valio, body)
 
 
-def test_admin_cannot_decide_foreign_or_own_orders_or_without_reason(
+def test_the_buyer_decides_their_own_agents_escalation(tmp_path: Path, catalog: Catalog, fake_valio: FakeValio) -> None:
+    async def body(env: Env) -> None:
+        order = await escalated(env)
+        decided = await env.svc.decide(env.agent, order.order_id, approve=True, reason="buyer approved")
+        assert decided.status == OrderStatus.APPROVED
+        assert decided.decision is not None and decided.decision.decided_by is not None
+        assert decided.decision.decided_by.agent_id == env.agent.agent_id
+
+    run(tmp_path, catalog, fake_valio, body)
+
+
+def test_foreign_keys_cannot_see_or_decide_and_a_reason_is_required(
     tmp_path: Path, catalog: Catalog, fake_valio: FakeValio
 ) -> None:
     async def body(env: Env) -> None:
-        admin = env.admin()
-        foreign_admin = env.admin(customer="cust-2", name="rival")
+        rival = env.colleague(customer="cust-2", name="rival")
         order = await escalated(env)
 
-        e = await refused("order_not_found", env.svc.decide(foreign_admin, order.order_id, approve=True, reason="x"))
+        e = await refused("order_not_found", env.svc.decide(rival, order.order_id, approve=True, reason="x"))
         assert e.status == 404
         with pytest.raises(OrderError):
-            env.svc.audit(foreign_admin, order.order_id)
-        await refused("reason_required", env.svc.decide(admin, order.order_id, approve=True, reason="   "))
-
-        own = await escalated(env, "own", agent=admin)
-        e = await refused("self_approval_forbidden", env.svc.decide(admin, own.order_id, approve=True, reason="x"))
-        assert e.status == 403
-        assert env.svc.get_order(admin, own.order_id).status == OrderStatus.PENDING_APPROVAL
+            env.svc.audit(rival, order.order_id)
+        assert env.svc.list_pending_approvals(rival).orders == []
+        await refused("reason_required", env.svc.decide(env.agent, order.order_id, approve=True, reason="   "))
+        assert env.svc.get_order(env.agent, order.order_id).status == OrderStatus.PENDING_APPROVAL
 
     run(tmp_path, catalog, fake_valio, body)
 

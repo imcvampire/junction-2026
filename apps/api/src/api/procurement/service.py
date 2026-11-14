@@ -2,8 +2,8 @@
 
 Every rule that matters is enforced here, whatever the transport: quote ownership and expiry, fixed
 prices (re-quoted and refused on any change), lot sizes, the agent's spend limit and the
-requirements frozen on the quote. So is authorization: members see their own orders; admins also see
-and decide their customer's orders, never ones they placed themselves.
+requirements frozen on the quote. So is authorization: every key of a customer sees that customer's
+orders, and its human may approve or reject the pending ones through it.
 """
 
 import asyncio
@@ -84,8 +84,6 @@ class ProcurementService:
             agent_id=agent.agent_id,
             name=agent.name,
             customer=agent.customer,
-            role=agent.role,
-            can_approve=agent.is_admin,
             spend_limit_eur=limit.amount,
             spend_limit_source=limit.source,
             required_tags=agent.mandate.required_tags,
@@ -269,7 +267,6 @@ class ProcurementService:
     ) -> OrderList:
         limit = max(1, min(limit, 100))
         if scope == "company":
-            self.require_admin(agent, "list_company_orders")
             orders = self._store.list_customer_orders(agent.customer, status, limit)
         else:
             orders = self._store.list_agent_orders(agent.agent_id, status, limit)
@@ -277,22 +274,13 @@ class ProcurementService:
 
     def list_pending_approvals(self, agent: AgentPrincipal, limit: int = 20) -> OrderList:
         """The customer's approval queue, oldest first."""
-        self.require_admin(agent, "list_pending_approvals")
         orders = self._store.list_customer_orders(
             agent.customer, OrderStatus.PENDING_APPROVAL, max(1, min(limit, 100)), oldest_first=True
         )
         return OrderList(orders=[OrderView.of(o) for o in orders])
 
     async def decide(self, agent: AgentPrincipal, order_id: str, *, approve: bool, reason: str) -> OrderView:
-        self.require_admin(agent, "approve" if approve else "reject")
         order = self._visible_order(agent, order_id)
-        if order.agent_id == agent.agent_id:
-            log.info("authz_denied agent_id=%s op=self_approval order_id=%s", agent.agent_id, order.id)
-            raise OrderError(
-                "self_approval_forbidden",
-                "An order cannot be approved or rejected with the key that placed it; ask another admin",
-                status=403,
-            )
         reason = reason.strip()
         if not reason:
             raise OrderError("reason_required", "Give the reason for the decision", status=422)
@@ -300,7 +288,7 @@ class ProcurementService:
             order.id,
             approve=approve,
             reason=reason,
-            decided_by=DecidedBy(agent_id=agent.agent_id, name=agent.name, role=agent.role),
+            decided_by=DecidedBy(agent_id=agent.agent_id, name=agent.name),
         )
         return OrderView.of(decided)
 
@@ -327,21 +315,10 @@ class ProcurementService:
             raise OrderError("product_not_found", f"Product {product_id} not found", status=404)
         return p
 
-    @staticmethod
-    def require_admin(agent: AgentPrincipal, op: str) -> None:
-        """403 `forbidden` unless the key is an admin."""
-        if not agent.is_admin:
-            log.info("authz_denied agent_id=%s op=%s", agent.agent_id, op)
-            raise OrderError(
-                "forbidden",
-                "This key is not allowed to approve or view company orders; ask an admin",
-                status=403,
-            )
-
     def _visible_order(self, agent: AgentPrincipal, order_id: str) -> Order:
-        """The agent's own order, or for an admin any order of its customer. Anything else is 404."""
+        """Any order of the agent's customer, its own included. Anything else is 404."""
         order = self._store.get_order(order_id)
-        if order is not None and agent.is_admin and order.customer == agent.customer:
+        if order is not None and order.customer == agent.customer:
             return order
         return self._own(order, agent, order_id)
 

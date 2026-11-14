@@ -15,26 +15,16 @@ case "$sandbox" in
     ;;
 esac
 
-if [[ -z "${VALIO_AIMO_AGENT_KEY:-}" ]]; then
-  echo "VALIO_AIMO_AGENT_KEY is not set. Create one with:" >&2
-  echo "  mise run agent:create -- --name skill-test --customer <id>" >&2
-  echo "then put it in .env." >&2
-  exit 1
-fi
-
 mkdir -p "$sandbox/.claude/skills"
 ln -sfn "$repo_root/skills/valio-aimo-purchasing" "$sandbox/.claude/skills/valio-aimo-purchasing"
 
-# A plain `claude` in the sandbox has no mise environment, so the key is written in literally.
-# The sandbox is outside the repo and the file is owner-only.
-umask 077
+# The MCP endpoint takes no key: every client acts as the shared agent of API_VALIO_CUSTOMER.
 cat >"$sandbox/.mcp.json" <<EOF
 {
   "mcpServers": {
     "valio-aimo": {
       "type": "http",
-      "url": "$mcp_url",
-      "headers": { "Authorization": "Bearer $VALIO_AIMO_AGENT_KEY" }
+      "url": "$mcp_url"
     }
   }
 }

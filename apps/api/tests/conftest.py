@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from api.agents.models import AgentPrincipal, Mandate, Role
+from api.agents.models import AgentPrincipal, Mandate
 from api.catalog.index import Catalog, load_catalog
 from api.config import Settings
 from api.main import create_app
@@ -122,10 +122,8 @@ AgentFactory = Callable[..., tuple[AgentPrincipal, str]]
 
 @pytest.fixture
 def make_agent(client: TestClient) -> AgentFactory:
-    def make(
-        name: str = "hotel-agent", customer: str = "hotel-1", role: Role = "member", **mandate: Any
-    ) -> tuple[AgentPrincipal, str]:
-        return services_of(client).agents.create(name, customer, Mandate(**mandate), role)
+    def make(name: str = "hotel-agent", customer: str = "hotel-1", **mandate: Any) -> tuple[AgentPrincipal, str]:
+        return services_of(client).agents.create(name, customer, Mandate(**mandate))
 
     return make
 

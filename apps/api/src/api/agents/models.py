@@ -1,12 +1,8 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 _ALLERGEN_CODE = r"^[A-Z0-9]{2,3}$"
-
-Role = Literal["member", "admin"]
-ROLES: tuple[Role, ...] = ("member", "admin")
 
 
 class Mandate(BaseModel):
@@ -37,11 +33,6 @@ class AgentPrincipal(BaseModel):
     customer: str
     mandate: Mandate
     created_at: datetime
-    role: Role = "member"
-
-    @property
-    def is_admin(self) -> bool:
-        return self.role == "admin"
 
 
 class AgentRecord(AgentPrincipal):

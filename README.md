@@ -40,15 +40,10 @@ cd apps/api && uv run pytest tests/test_<area>.py   # one test file
 `CLAUDE.md` and backend docs out of the agent's context, so it sees only what an external buyer's
 agent would.
 
-1. Start the API with `mise run dev` and leave it running.
-2. Create an agent key. A low spend limit makes the reference request go through human approval:
-
-   ```sh
-   mise run agent:create -- --name skill-test --customer <customer-id> --spend-limit 300
-   ```
-
-   The key (`vaa_…`) is printed once. Put it in `.env` as `VALIO_AIMO_AGENT_KEY=vaa_…`.
-3. Build the sandbox and start Claude Code in it:
+1. Start the API with `mise run dev` and leave it running. The MCP endpoint needs no key: every
+   MCP client acts as the shared agent `agt_mcp` of `API_VALIO_CUSTOMER`, with the global spend
+   threshold as its limit.
+2. Build the sandbox and start Claude Code in it:
 
    ```sh
    mise run skill:sandbox
@@ -56,14 +51,14 @@ agent would.
    ```
 
    Accept the folder trust prompt on the first run. `/mcp` should show `valio-aimo` connected.
-4. Give it the reference request:
+3. Give it the reference request:
 
    > I need 1,000 litres of lactose-free milk by Monday. Find an option that meets our
    > requirements based on price and availability.
 
    Expect `whoami`, then `search_products`, a `quote` of a short list, and `place_order`. Over the
    spend limit, the order comes back `pending_approval`.
-5. Act as the human approver, then let the agent read the decision with `get_order`:
+4. Act as the human approver, then let the agent read the decision with `get_order`:
 
    ```sh
    curl -X POST http://127.0.0.1:8000/api/orders/<order-id>/approve \
@@ -73,8 +68,7 @@ agent would.
 
 Notes:
 
-- The sandbox's `.mcp.json` holds the agent key in plain text (owner-only file, outside the repo).
-  Run `mise run skill:sandbox` again after changing the key or `API_PORT`.
+- Run `mise run skill:sandbox` again after changing `API_PORT`.
 - The skill is symlinked from `skills/`, so edits apply to the next `claude` session.
 - Set `VALIO_AGENT_SANDBOX` to put the sandbox elsewhere; it must be outside the repo.
 - Your global Claude Code MCP servers and `~/.claude` settings still load in the sandbox.
