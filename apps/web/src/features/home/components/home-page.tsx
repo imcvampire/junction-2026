@@ -171,11 +171,10 @@ export function HomePage() {
               Open the order console
             </Link>
           </div>
-          <dl className="grid max-w-md grid-cols-3 gap-4 pt-2">
+          <dl className="grid max-w-md grid-cols-2 gap-4 pt-2">
             {[
               ["17k+", "products"],
               ["13", "MCP tools"],
-              ["0", "keys needed"],
             ].map(([value, label]) => (
               <div key={label}>
                 <dt className="sr-only">{label}</dt>
