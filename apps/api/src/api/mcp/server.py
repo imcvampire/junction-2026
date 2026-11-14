@@ -23,7 +23,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.session import ServerSession
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, ContentBlock, TextContent, ToolAnnotations
-from pydantic import BaseModel, Field, ValidationError, create_model, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator
 from starlette.requests import Request
 
 from api.agents.models import AgentPrincipal
@@ -119,7 +119,17 @@ _SUGGESTED_REASON = Field(
 )
 
 
-class DecisionForm(BaseModel):
+def _drop_title(schema: dict[str, Any]) -> None:
+    schema.pop("title", None)
+
+
+class _Form(BaseModel):
+    """An elicitation form. MCP's requestedSchema has no top-level `title`; Codex cancels any form that has one."""
+
+    model_config = ConfigDict(json_schema_extra=_drop_title)
+
+
+class DecisionForm(_Form):
     decision: str = Field(json_schema_extra={"enum": ["approve", "reject"]}, description="approve or reject")
     reason: str = Field(
         default="",
@@ -156,7 +166,7 @@ def _decision_form(approve: bool, suggestion: str | None) -> type[DecisionForm]:
     )
 
 
-class CancelForm(BaseModel):
+class CancelForm(_Form):
     confirm: bool = Field(default=True, description="Cancel the order")
     reason: str = Field(min_length=1, max_length=1000, description="Why, in your words (kept in the audit trail)")
 

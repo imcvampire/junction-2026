@@ -56,8 +56,12 @@ Then ask with a dialog (header `Ingredients`): `Order this list (Recommended)`, 
 change as the new list. Record the dialog in `questions[]`.
 
 After confirmation, each ingredient is one product request: search it (step 2), quote the short
-lists together (at most 12 products per `quote`, so split across quotes for a long list), and rank
-and order per ingredient (steps 3 to 7). A pantry staple the buyer says they already have is dropped.
+lists (at most 1,000 products per `quote`; quote a longer list in batches, one call after
+another), and rank per
+ingredient (steps 3 and 4). Then buy every chosen product in one order, the session's only one:
+quote the chosen products together if they came from several quotes. Never ask the buyer to drop
+ingredients to fit a limit, and never place one order per ingredient. A pantry staple the buyer says
+they already have is dropped.
 
 ## Failures
 

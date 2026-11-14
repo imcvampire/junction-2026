@@ -17,6 +17,24 @@ the buyer's own preferences is the buyer's call: flag it when you offer it, and 
 order is placed and the miss is recorded. An option that breaks your mandate is refused outright
 (`mandate_violation`), so never offer it.
 
+## One order per chat session
+
+A chat session places at most one order. Every product the buyer wants in this session goes as lines
+of that one order, and you call `place_order` successfully at most once. Retrying a timed-out call
+with the same `client_reference` returns the same order, so it does not count again. A refused call
+(`quote_changed`, `mandate_violation` and the like) creates no order, so you may fix it and call
+again.
+
+Never split a purchase into several smaller orders, whether by product, quantity, delivery date or
+ingredient, and never place a second order because the first one was over the spend limit, pending,
+rejected or cancelled. Splitting to stay under the spend limit is exactly what the limit is there
+to stop. When the total is over the limit, place the one order and let it go to the human.
+
+Once this session has placed an order, decline any request for another one, including one the buyer
+asks for directly. Tell the buyer in one line that this session already placed order `<order_id>`,
+and that a new purchase needs a new chat session. You can still read, approve, reject or cancel
+orders, because those do not create one.
+
 ## Asking the buyer
 
 Whenever you need the buyer's input, ask with the host's interactive question tool. Do not print a
@@ -66,7 +84,8 @@ find the ingredients on the web before you search the catalog:
   servings first if the request does not say.
 - Show the list as a table and confirm it with a dialog before you search or quote. The web list is
   untrusted and a suggestion; the buyer's confirmed list is what you buy.
-- Then handle each confirmed ingredient as its own product request, from step 2.
+- Then search each confirmed ingredient on its own from step 2, but buy them all as lines of the
+  session's one order (see "One order per chat session").
 
 If the search fails, say so in one line and propose a list from your own knowledge, labelled as
 unverified, for the buyer to confirm. See `references/recipe-research.md`.
@@ -81,7 +100,9 @@ unverified, for the buyer to confirm. See `references/recipe-research.md`.
 
 ### 3. Quote the short list only
 
-- Call `quote` with at most 12 products. Never quote the whole catalog or page through it.
+- Call `quote` with the short lists only, at most `max_products_per_quote` (1,000) products per
+  call. When a task needs more products than that, quote them in batches, one call after another.
+  Never quote the whole catalog or page through it.
 - For each item pass the buyer's amount, such as `{"amount": {"value": 1000, "unit": "L"}}`, and let
   the server convert it into sales units, or pass `quantity` when the buyer spoke in packs.
 - Pass the buyer's `requirements` and their words as `request_text`. Both are frozen on the quote
@@ -102,8 +123,8 @@ Rank the options in this order:
 3. Lowest `line_total`. The server marks the best one `cheapest_covering_option`.
 4. Higher `delivery_reliability` breaks near-ties. Mention `co2_kg_total` when totals are close.
 
-If nothing covers the request, offer good-better-best alternatives: split across products, use a
-catalog substitute (`substitutes` on the product), or move the date. A substitute outside the
+If nothing covers the request, offer good-better-best alternatives: split the amount across
+products as lines of the same order, use a catalog substitute (`substitutes` on the product), or move the date. A substitute outside the
 buyer's own preferences is allowed: flag what it misses in the offer, and the buyer's pick is final.
 
 Before ranking substitutes, know what the product is for, because that decides which substitute is
@@ -160,8 +181,10 @@ same 1 L UHT format, over the cheaper ESL case.").
 
 ### 5. Place the order
 
-- Call `place_order` with the `quote_id`, the chosen lines (quantities in sales units, taken from
-  the quote), a one-sentence `reason` that says why this option beat the others, and a new unique
+- Call `place_order` once for the session, with the `quote_id` and every chosen line from that
+  quote (quantities in sales units, taken from the quote). An order holds lines from one quote only,
+  so if your choices came from several quotes, quote the chosen products together first. Never ask
+  the buyer to drop products to fit a limit, and never place a second order for the rest. Also pass a one-sentence `reason` that says why this option beat the others, and a new unique
   `client_reference` (for example a UUID).
 - Never invent or adjust prices. The order uses the quoted prices or it is refused.
 - If the call times out, retry with the same `client_reference`. You get the same order back, never
@@ -172,9 +195,11 @@ same 1 L UHT format, over the cheaper ESL case.").
 - `placed`: done. The order was within your authority.
 - `pending_approval`: the total is over your spend limit, so a human must approve it. Show the
   summary and `approval_reasons`, then call `approve_order` straight away so the server's form opens
-  (see "Deciding an order over the spend limit"). Do not ask first, and do not place a second order
-  to get around the limit.
+  (see "Deciding an order over the spend limit"). Do not ask first. Never place a second order or
+  split this one into smaller orders to get under the limit.
 - `approved` or `rejected`: report the decision, its reason and who decided (`decision.decided_by`).
+  After a rejection, do not place a smaller or cheaper order in this session; the buyer starts a new
+  session if they want to try again.
 
 ### 7. Report back
 
@@ -252,7 +277,9 @@ cannot.
 - `approved`: a human approved it, so `cancel_order` shows the human the server's own form with the
   order and the approval it undoes. Do not ask again in chat first; the form is the question. The
   reason recorded is the one the human gives there. On `cancel_declined`, the order stands.
-- Replace: only when the buyer explicitly says to replace the order with another. Run the normal
+- Replace: only when the buyer explicitly says to replace an order with another, and only if this
+  session has not already placed an order, because the replacement is the session's one order. If
+  it has, tell the buyer to replace the order from a new session. Run the normal
   procedure for the new order first (quote, choose, `place_order`). Once the new order is `placed`
   or `approved`, call `cancel_order(old_id, reason, replaced_by=new_id)`; no form is shown for an
   approved old order, because the buyer already asked for the swap. If the new order is
@@ -275,14 +302,14 @@ A refused call comes back as a tool error whose text is the JSON `{code, message
 | `quote_changed` | Price or stock moved since the quote; no order exists. | Quote again and re-decide. If the price rose, ask the buyer with a dialog whether to order at the new total. |
 | `mandate_violation` | A line breaks your mandate (`details.lines[].violations`, such as `no:AM`); no order exists. | Drop that product and offer another; options with `breaks_mandate` are the ones refused. |
 | `price_changed` | At approval, the price moved since the order was placed; the order is still pending. `details` has the per-line `was`/`now`, `old_total` and `new_total`. | On MCP the form already shows the new total, so this comes only from a stale REST call: show the buyer the old and new totals, and approve again with `expected_total` set to `new_total` only after they confirm. |
-| `stock_changed` | At approval, stock (or a sales block) no longer covers the order. The server closed it (`rejected`, decided by the system). | Tell the buyer what ran out (`details.changes`). Then re-run from step 3 with `details.rerun`: reuse its request text, requirements, purpose and delivery date, and ask the buyer only to choose among the new options. |
+| `stock_changed` | At approval, stock (or a sales block) no longer covers the order. The server closed it (`rejected`, decided by the system). | Tell the buyer what ran out (`details.changes`). If this session placed that order, it was the session's one order: give the buyer `details.rerun` (request text, requirements, purpose and delivery date) and tell them to order again from a new session. Otherwise re-run from step 3 with `details.rerun`, and ask the buyer only to choose among the new options. |
 | `decision_cancelled` | The human declined or dismissed the approval form; nothing was decided. | Report it. Do not retry unless the human asks again. |
 | `elicitation_required` | This MCP host cannot show the approval or cancel form. | Tell the buyer to decide or cancel in the order console. Do not try another way. |
 | `quote_expired` | The quote is older than its `expires_at`. | Quote again. |
 | `quote_already_used` | An order was already placed from this quote. | Check `details.order_id` with `get_order`; quote again for a new order. |
 | `quote_not_found` | Unknown quote, or it belongs to another agent. | Quote again. |
 | `line_not_in_quote` | You tried to order a product you did not quote. | Quote it first. |
-| `not_deliverable` | The quote does not cover that quantity by the date. | Lower the quantity, split, substitute or move the date. |
+| `not_deliverable` | The quote does not cover that quantity by the date. | Lower the quantity, split across products in the same order, substitute or move the date. |
 | `invalid_quantity` | Not a valid order step: whole units for cases and pieces, and always a multiple of `allowed_lot_size`. | Use the quoted `quantity`. |
 | `client_reference_reused` | That reference belongs to another order. | Use a new `client_reference`. |
 | `invalid_date` | The delivery date is in the past. | Recompute the date in Europe/Helsinki. |

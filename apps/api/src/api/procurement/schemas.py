@@ -8,7 +8,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from api.catalog.index import ALLERGEN_NAMES, Product
 from api.orders.models import AuditEntry, Cancellation, Order, OrderDecision, OrderLine, OrderStatus
 
-MAX_QUOTE_ITEMS = 12
+MAX_QUOTE_ITEMS = 1000
 MAX_SEARCH_RESULTS = 20
 MAX_LINE_QUANTITY = 100_000
 

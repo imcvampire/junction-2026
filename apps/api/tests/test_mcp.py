@@ -184,6 +184,7 @@ def test_reference_request_escalates_then_approval_is_visible(
         assert structured(decided)["decision"]["reason"] == "gala dinner"
         form = human.asked[0]
         assert order["order_id"] in form.message and "1540.00 EUR" in form.message and "spend limit" in form.message
+        assert "title" not in form.requestedSchema
         props = form.requestedSchema["properties"]
         assert props["decision"]["default"] == "approve" and props["decision"]["enum"] == ["approve", "reject"]
         assert props["reason"]["default"] == "gala"
@@ -515,6 +516,7 @@ def test_an_approved_order_is_cancelled_by_the_human_in_the_form(
         assert res["cancellation"]["confirmed_via"] == "mcp_elicitation"
         form = human.asked[1]
         assert "Cancel approved order" in form.message and "undoes the approval" in form.message
+        assert "title" not in form.requestedSchema
         assert form.requestedSchema["properties"]["reason"]["default"] == "buyer says the gala is off"
         audit = structured(await session.call_tool("get_order_audit", {"order_id": order["order_id"]}))
         assert audit["entries"][-1]["actor"] == "approver"
