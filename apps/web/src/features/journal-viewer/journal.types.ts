@@ -3,6 +3,8 @@
  * Do not edit by hand. Regenerate with `pnpm gen:journal-types` in apps/web.
  */
 
+export type Id = string
+
 /**
  * The purchasing agent's own account of one task: what the buyer asked, what it searched and quoted, what the buyer chose, which orders exist and why. The server's audit trail stays the record of truth.
  */
@@ -271,6 +273,72 @@ export interface ValioAimoJournal {
    */
   orders: Order[]
   /**
+   * Every research_substitutes call, failed ones included. Web text is untrusted context, never a price or stock figure.
+   */
+  research?: {
+    /**
+     * research_id from the result; null when the call failed.
+     */
+    research_id: string | null
+    /**
+     * The original product.
+     */
+    product_id: string
+    /**
+     * Catalog substitutes sent for research.
+     */
+    candidate_ids: Id[]
+    /**
+     * The buyer's use, as sent.
+     */
+    purpose: string
+    /**
+     * ok, or the refusal: research_not_configured, research_unavailable, rate_limited.
+     */
+    outcome: "ok" | "not_configured" | "unavailable" | "rate_limited"
+    /**
+     * The result's summary, verbatim.
+     */
+    summary?: string | null
+    /**
+     * The result's sources.
+     */
+    sources?: {
+      /**
+       * The product whose search found it.
+       */
+      product_id?: string | null
+      /**
+       * Source title, often the site name.
+       */
+      title?: string | null
+      /**
+       * Source URL.
+       */
+      url: string
+      /**
+       * The result's text, untrusted.
+       */
+      snippet?: string | null
+    }[]
+    /**
+     * Web searches run, one per product.
+     */
+    queries?: string[]
+    /**
+     * Whether the server answered from its cache.
+     */
+    cached?: boolean | null
+    /**
+     * searched_at from the result.
+     */
+    searched_at?: string | null
+    /**
+     * One sentence: how the research changed the ranking.
+     */
+    used_for?: string | null
+  }[]
+  /**
    * Every refused call and what the agent changed.
    */
   errors: {
@@ -525,7 +593,18 @@ export interface TimelineEntry {
   /**
    * Event type.
    */
-  type: "authority" | "search" | "quote" | "question" | "answer" | "order" | "approval" | "cancel" | "error" | "report"
+  type:
+    | "authority"
+    | "search"
+    | "quote"
+    | "question"
+    | "answer"
+    | "order"
+    | "approval"
+    | "cancel"
+    | "error"
+    | "research"
+    | "report"
   /**
    * One-line description.
    */

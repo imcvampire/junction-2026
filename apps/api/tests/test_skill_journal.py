@@ -86,3 +86,47 @@ def test_order_and_option_fields_use_server_names(schema: dict[str, Any]) -> Non
 
     assert set(defs["order"]["properties"]) <= set(OrderView.model_fields)
     assert set(defs["option"]["properties"]) - {"chosen"} <= set(QuoteOption.model_fields)
+
+
+RESEARCH_ENTRY: dict[str, Any] = {
+    "research_id": "5b0e7f4c-3f8a-4d7e-9a51-2c1d6f0b9e21",
+    "product_id": "464073",
+    "candidate_ids": ["469363", "464768"],
+    "purpose": "coffee",
+    "outcome": "ok",
+    "summary": "469363 foams most like the original.",
+    "sources": [{"title": "arla.fi", "url": "https://www.arla.fi/"}],
+    "queries": ["lactose free milk barista foam"],
+    "cached": False,
+    "searched_at": "2026-11-13T09:14:05Z",
+    "used_for": "Ranked 469363 first for coffee.",
+}
+
+
+def test_journal_without_research_still_validates(schema: dict[str, Any], example: dict[str, Any]) -> None:
+    assert "research" not in example
+    assert _errors(schema, example) == []
+
+
+def test_research_entries_validate(schema: dict[str, Any], example: dict[str, Any]) -> None:
+    failed = {"research_id": None, "product_id": "464073", "candidate_ids": ["469363"], "purpose": "coffee"}
+    doc = {**example, "research": [RESEARCH_ENTRY, {**failed, "outcome": "not_configured"}]}
+    assert _errors(schema, doc) == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {**RESEARCH_ENTRY, "outcome": "maybe"},
+        {**RESEARCH_ENTRY, "price": 2.48},
+        {k: v for k, v in RESEARCH_ENTRY.items() if k != "purpose"},
+    ],
+)
+def test_bad_research_entries_fail(schema: dict[str, Any], example: dict[str, Any], entry: dict[str, Any]) -> None:
+    assert _errors(schema, {**example, "research": [entry]})
+
+
+def test_journal_doc_research_example_validates(schema: dict[str, Any], example: dict[str, Any]) -> None:
+    doc = (REFERENCES / "journal.md").read_text(encoding="utf-8")
+    snippet = doc.split("A research entry for the substitute choice", 1)[1].split("```json", 1)[1].split("```", 1)[0]
+    assert _errors(schema, {**example, "research": [json.loads(snippet)]}) == []

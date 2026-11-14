@@ -1,12 +1,18 @@
 ---
 phase: 1
 title: "Server tool research_substitutes"
-status: pending
+status: completed
 effort: 2.5h
 depends_on: []
 ---
 
 # Phase 1: Server tool `research_substitutes`
+
+> **Changed 2026-11-14:** the backend is now Oxylabs Web API search (`api/research/oxylabs.py`,
+> `OxylabsSearch` behind the `WebSearch` protocol), one query per product built by
+> `build_queries`, with a digest instead of an LLM summary. Settings: `oxylabs_api_key`,
+> `oxylabs_base_url`, `oxylabs_location` (`FI`), `research_results_per_product` (3). `gemini.py`
+> and `google-genai` are removed. The Gemini steps below are kept as history.
 
 ## Context
 
@@ -50,6 +56,13 @@ Modify:
    `mise exec`, printing only: model accepted (yes/no), `type(interaction)`, the attribute names that
    carry grounding (search queries, source URLs/titles). Never print the key. Record the attribute
    paths in this phase file. If `gemini-4-hydrogen` is rejected, stop and ask the user for the model.
+   **Result (2026-11-14):** `gemini-4-hydrogen` exists (it answers 429 quota exceeded; an unknown name
+   answers 404). The key's quota was used up, so no live response was seen; the shape below comes from
+   the installed SDK 3.3.0 models and is tested against `google.genai.interactions.Interaction`.
+   Queries: steps with `type == "google_search_call"`, `arguments.queries`. Sources: steps with
+   `type == "model_output"`, `content[].annotations[]` with `type == "url_citation"` (`url`, `title`).
+   Text: `interaction.output_text`. Default SDK retries made one 429 take over 120 s, so the client
+   is built with `HttpRetryOptions(attempts=1)`.
 2. Add the dependency: `uv add 'google-genai>=3.3'` in `apps/api`.
 3. Settings fields as listed above. `.env.example` entries.
 4. `models.py`:

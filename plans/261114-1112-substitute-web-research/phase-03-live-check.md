@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Live check in the skill sandbox"
-status: pending
+status: in-progress
 effort: 1h
 depends_on: [1, 2]
 ---
@@ -12,7 +12,7 @@ depends_on: [1, 2]
 
 - `mise run dev` serves the API and MCP on port 8000; `mise run skill:sandbox` prepares a directory
   outside the repo where plain `claude` sees only the MCP server and the skill.
-- `API_GEMINI_API_KEY` must be set in `.env` (the user's key, never echoed).
+- `API_OXYLABS_API_KEY` must be set in `.env` (the user's key, never echoed).
 
 ## Steps
 
@@ -23,11 +23,11 @@ depends_on: [1, 2]
    `API_REQUIRED_TAGS` set so the first choice needs a substitute).
 3. Check, from the MCP transcript and server logs:
    - `research_substitutes` is called once, before the substitute table and dialog.
-   - The outbound prompt (DEBUG log, local only) holds catalog facts and purpose, no price or
+   - The outbound queries (DEBUG log, local only) hold catalog names and purpose, no price or
      customer id.
    - The dialog descriptions cite fit points and a source site.
    - The order, price and stock match `quote`, not the web text.
-4. Repeat with `API_GEMINI_API_KEY` unset: the agent reports web context unavailable in one line,
+4. Repeat with `API_OXYLABS_API_KEY` unset: the agent reports web context unavailable in one line,
    still offers catalog substitutes, and the journal records `outcome: not_configured`.
 5. Validate both journals against the schema and open them in the web viewer.
 6. Write `plans/reports/live-check-261114-<HHMM>-substitute-research.md`: what ran, pass/fail per

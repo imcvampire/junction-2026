@@ -9,6 +9,7 @@ from api.config import Settings
 from api.orders.service import OrderService
 from api.orders.store import Store
 from api.procurement.service import ProcurementService
+from api.research.service import ResearchService
 from api.valio.client import ValioClient
 
 
@@ -20,6 +21,7 @@ class Services:
     store: Store
     orders: OrderService
     procurement: ProcurementService
+    research: ResearchService
     agent: AgentPrincipal
 
 

@@ -29,6 +29,30 @@ describe("parseJournal", () => {
     })
   })
 
+  test("accepts a journal with web research and one without", () => {
+    const withResearch = {
+      ...example,
+      research: [
+        {
+          research_id: "r1",
+          product_id: "464073",
+          candidate_ids: ["469363"],
+          purpose: "coffee",
+          outcome: "ok",
+          summary: "469363 foams like the original.",
+          sources: [{ title: "arla.fi", url: "https://www.arla.fi/" }],
+        },
+      ],
+    }
+    expect(parseJournal(JSON.stringify(example)).ok).toBe(true)
+    expect(parseJournal(JSON.stringify(withResearch)).ok).toBe(true)
+    const badOutcome = {
+      ...withResearch,
+      research: [{ ...withResearch.research[0], outcome: "maybe" }],
+    }
+    expect(parseJournal(JSON.stringify(badOutcome)).ok).toBe(false)
+  })
+
   test("reports text that is not JSON", () => {
     const result = parseJournal("{")
 

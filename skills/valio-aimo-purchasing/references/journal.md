@@ -43,11 +43,31 @@ The document never stores its own file name or path, and never refers to another
 | `questions[]` | Each dialog: header, question, options with `recommended`, the label picked as `answer`, and anything typed as `free_text`. |
 | `decision` | `rule`: `cheapest_covering` (the ranking decided), `buyer_choice`, `split` or `no_order`; the lines ordered; `reason` is the `place_order` reason. `null` for a task with no choice, such as a cancel. |
 | `orders[]` | The last result you saw for each order the task touched (`place_order`, `approve_order`, `reject_order`, `cancel_order`, `get_order`). `decision.decision` is `approved` or `rejected`, `decided_by` is `decision.decided_by.agent_id`, and `confirmed_via` comes from `get_order_audit`. `cancellation.cancelled_by` is `cancelled_by.agent_id`. |
+| `research[]` | One per `research_substitutes` call, failed ones included: `research_id`, `product_id`, `candidate_ids`, `purpose`, `summary`, `sources`, `queries`, `cached`, `searched_at` copied from the result; `outcome` is `ok` or the refusal (`not_configured`, `unavailable`, `rate_limited`, with `research_id` `null`; an `unknown_product` or `invalid_arguments` refusal goes in `errors[]` only); `used_for` is one sentence on how it changed the ranking. Omit the section when no substitute was researched. Add a `research` timeline entry. |
 | `errors[]` | Every refused call: `tool`, `code`, `message`, and `handling`, what you did next (for example `Reported to the buyer; did not retry.`). |
 | `timeline[]` | One entry per step, `seq` from 1 with no gaps. `refs` name only ids that appear in `quotes`, `orders` or `candidates`. |
 | `metrics` | Counts of your Valio Aimo tool calls, quotes and dialogs; `total_excl_vat` sums the task's orders that are not cancelled or rejected; `savings_vs_next_option_eur` is the next covering option's `line_total` minus the chosen one's. |
 | `narrative` | Plain text, no Markdown: what happened, why the chosen option won, and anything to watch. |
 | `next_steps[]` | What is left for the buyer, such as an order still pending approval. Empty when nothing is. |
+
+A research entry for the substitute choice in `worked-example.md` (the example journal itself needs
+none, because its order needed no substitute):
+
+```json
+{
+  "research_id": "5b0e7f4c-3f8a-4d7e-9a51-2c1d6f0b9e21",
+  "product_id": "<café milk id>",
+  "candidate_ids": ["469363", "469330", "464768", "464179"],
+  "purpose": "coffee",
+  "outcome": "ok",
+  "summary": "For coffee, fat and protein decide foam. 469363 is closest to the original ...",
+  "sources": [{"title": "arla.fi", "url": "https://www.arla.fi/"}],
+  "queries": ["lactose free milk barista foam UHT vs ESL"],
+  "cached": false,
+  "searched_at": "2026-11-13T09:14:05Z",
+  "used_for": "Ranked 469363 first for coffee: same UHT semi-skimmed milk, foams like the original."
+}
+```
 
 ## Rules
 

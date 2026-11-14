@@ -136,6 +136,56 @@ describe("JournalView", () => {
     expect(container.querySelector("img")).toBeNull()
   })
 
+  test("hides web research when the journal has none", () => {
+    renderJournal(loadExample())
+
+    expect(
+      screen.queryByRole("heading", { name: "Web research" })
+    ).not.toBeInTheDocument()
+  })
+
+  test("shows web research with only http links as links", () => {
+    renderJournal(
+      loadExample((journal) => {
+        journal.research = [
+          {
+            research_id: "r1",
+            product_id: "464073",
+            candidate_ids: ["469363", "464768"],
+            purpose: "coffee",
+            outcome: "ok",
+            summary: "<b>469363</b> foams like the original.",
+            sources: [
+              {
+                product_id: "469363",
+                title: "arla.fi",
+                url: "https://www.arla.fi/",
+                snippet: "Foams well for cappuccino.",
+              },
+              { title: "evil", url: "javascript:alert(1)" },
+            ],
+            used_for: "Ranked 469363 first.",
+          },
+        ]
+      })
+    )
+
+    const section = screen
+      .getByRole("heading", { name: "Web research" })
+      .closest("section")
+    if (!section) throw new Error("research section missing")
+    const view = within(section)
+    expect(
+      view.getByText("<b>469363</b> foams like the original.")
+    ).toBeInTheDocument()
+    const link = view.getByRole("link", { name: "arla.fi" })
+    expect(link).toHaveAttribute("href", "https://www.arla.fi/")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    expect(view.queryByRole("link", { name: "evil" })).not.toBeInTheDocument()
+    expect(view.getByText("evil")).toBeInTheDocument()
+    expect(view.getByText("Foams well for cappuccino.")).toBeInTheDocument()
+  })
+
   test("renders missing values as unknown", () => {
     renderJournal(loadExample())
 

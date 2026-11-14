@@ -9,6 +9,7 @@ import { OrdersList } from "./orders-list"
 import { QuestionsList } from "./questions-list"
 import { QuoteTables } from "./quote-table"
 import { RequestAuthority } from "./request-authority"
+import { ResearchList } from "./research-list"
 
 export function JournalView({ journal }: { journal: ValioAimoJournal }) {
   return (
@@ -21,6 +22,7 @@ export function JournalView({ journal }: { journal: ValioAimoJournal }) {
       <Separator />
       <JournalTimeline timeline={journal.timeline} />
       <RequestAuthority journal={journal} />
+      <ResearchList research={journal.research} />
       <QuoteTables journal={journal} />
       <QuestionsList questions={journal.questions} />
       <OrdersList orders={journal.orders} />

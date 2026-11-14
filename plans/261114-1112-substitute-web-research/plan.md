@@ -1,7 +1,7 @@
 ---
 title: Web research before choosing a substitute
-description: Before the purchasing agent ranks or offers any substitute, it calls a new read-only MCP tool, research_substitutes, which runs a Gemini Google Search grounded lookup on the server and returns a cited summary of how well each catalog candidate fits the buyer's use. The skill makes the call mandatory and records it in the journal.
-status: pending
+description: Before the purchasing agent ranks or offers any substitute, it calls a new read-only MCP tool, research_substitutes, which runs one Oxylabs web search per product on the server and returns the cited snippets, grouped by product id, for the agent to judge each catalog candidate's fit to the buyer's use. The skill makes the call mandatory and records it in the journal.
+status: in-progress
 priority: P2
 effort: 5h
 branch: master
@@ -20,10 +20,11 @@ builds_on: plans/261114-1028-purchasing-session-journal
 - When the requested product cannot cover the request, or the agent is about to offer any
   substitute, the skill requires one `research_substitutes` call per original product and purpose
   **before** it ranks or offers substitutes.
-- The tool runs on the API server. It builds the search prompt only from catalog facts (names,
-  category, tags, allergens, pack, origin) and the buyer's stated purpose, calls Gemini through the
-  `google-genai` Interactions API with the `google_search` tool, and returns a summary, per-candidate
-  fit notes in prose, the search queries used and the cited sources.
+- The tool runs on the API server. It builds one query per product (original and each candidate)
+  from the catalog name and the buyer's stated purpose, runs them through the Oxylabs Web API
+  (`POST https://webapi.oxylabs.io/v1/search`, Bearer key), and returns a digest of the results
+  grouped by product id, the queries and the sources with their snippets. The purchasing agent
+  compares them; there is no server-side LLM.
 - Web context changes only the *fit-to-purpose* ranking and the explanation the buyer sees. Price,
   stock, delivery date, mandate and the assortment still come only from the server's catalog and
   quote. A product that is not in the catalog is never offered.
@@ -36,15 +37,16 @@ builds_on: plans/261114-1028-purchasing-session-journal
 |---|---|---|
 | Where the search runs | Server-side MCP tool `research_substitutes` | A script bundled in the skill (`uv run --script`) is closer to "update the skill", but it puts the Gemini key on every buyer host (the sandbox would need it in its env), works only in hosts that can run Python, and leaves no server log. The host's own web-search tool (Claude Code `WebSearch`) is not the requested Google API and does not exist in every MCP host. |
 | What goes into the prompt | Catalog-derived facts plus a short `purpose` string; no free-text question | A free-text `question` would let an agent send customer prices, order history or the buyer's words to Google. The brief stresses not exposing confidential data, so the outbound payload is built by the server from public catalog fields only. |
-| Output shape | Prose `summary` plus `sources[]` and `queries[]` from grounding metadata | Gemini structured JSON output combined with the search tool is not reliably supported; a strict per-candidate schema would fail often. The agent reads prose; ids are named inside it. |
+| Search provider | Oxylabs Web API search, no LLM (changed 2026-11-14 at the user's request) | Gemini with `google_search` (first built) summarised on the server, but its key had no quota and it adds a second model between the web and the agent. Oxylabs AI Studio AI-Search needs its own SDK and key type; the given key is a Web API key. |
+| Output shape | `summary` as a deterministic digest grouped by product id, plus `sources[]` (`product_id`, `title`, `url`, `snippet`) and `queries[]` | Asking the provider for a ranking would need an LLM; the agent already compares, and per-product grouping keeps each snippet tied to one catalog id. |
 | Mandatory vs optional | Mandatory in the skill ("must call before ranking substitutes"); the server does not block `quote` or `place_order` without it | Enforcing it server-side would make ordering depend on a third-party search service. The skill guides; the server enforces only money, mandate and approval rules (goal S2). |
 | Failure behaviour | On `research_not_configured` / `research_unavailable`, say so in one line, continue on catalog facts, record the failure in the journal | Blocking the purchase on a search outage turns a nice-to-have context source into a single point of failure. |
-| Cost control | In-memory cache (1 h, keyed by product, sorted candidates, purpose, language) and a per-agent budget (`API_RESEARCH_PER_MINUTE`, default 6) reusing the `rate_limited` code | No cache means the same question costs a grounded Gemini call every turn. |
-| Model | `API_GEMINI_MODEL`, default `gemini-4-hydrogen` as in the user's example | Hard-coding the model makes a rename an API deploy. |
+| Cost control | In-memory cache (1 h, keyed by product, sorted candidates, purpose, language) and a per-agent budget (`API_RESEARCH_PER_MINUTE`, default 6) reusing the `rate_limited` code | No cache means the same question costs one search per product every turn (up to 9). |
+| Search locale | `API_OXYLABS_LOCATION`, default `FI`; `API_RESEARCH_RESULTS_PER_PRODUCT`, default 3 | Finnish results match the Valio Aimo assortment; 3 results per product keep the digest short. |
 
 ## Constraints
 
-- The Gemini key lives only in `.env` as `API_GEMINI_API_KEY` (gitignored, loaded by mise, redacted).
+- The Oxylabs key lives only in `.env` as `API_OXYLABS_API_KEY` (gitignored, loaded by mise, redacted).
   It never appears in the repo, plans, journals, logs or tool results. `.env.example` gets an empty
   entry.
 - The tool is read-only and marked `openWorldHint=True`. It needs no human approval.
@@ -64,20 +66,20 @@ builds_on: plans/261114-1028-purchasing-session-journal
 
 ## Extension trace
 
-Next credible variant: a second search provider (for example the host's own web search, or another
-grounded LLM). Stable contract: the `ResearchView` result (`research_id`, `summary`, `sources[]`,
-`queries[]`, `model`, `searched_at`) and the error codes. What changes: only
-`api/research/gemini.py` behind the `SubstituteResearcher` protocol. Phase 1 proves it by testing the
-tool against a fake researcher, never the Gemini SDK directly. A later variant that freezes
+Next credible variant: another search provider, or an LLM summary on top of the snippets. Stable
+contract: the `ResearchView` result (`research_id`, `summary`, `sources[]`, `queries[]`,
+`provider`, `searched_at`) and the error codes. What changes: only `api/research/oxylabs.py` behind
+the `WebSearch` protocol (`search(query) -> list[SearchHit]`). The switch from Gemini to Oxylabs
+proved it: the service, cache, budget and error codes did not change. A later variant that freezes
 `research_id` on `quote` reuses the same id without changing the result shape.
 
 ## Phases
 
 | # | Phase | Files | Status |
 |---|---|---|---|
-| 1 | [Server tool `research_substitutes`](phase-01-research-tool.md) | `apps/api/src/api/research/*`, `config.py`, `services.py`, `mcp/server.py`, `procurement/errors.py`, `pyproject.toml`, `uv.lock`, `.env.example`, `tests/test_research.py`, `tests/test_mcp.py` | pending |
-| 2 | [Skill and journal: research is mandatory before substitutes](phase-02-skill-research-step.md) | `skills/valio-aimo-purchasing/SKILL.md`, `README.md`, `references/substitute-research.md` (new), `references/worked-example.md`, `references/journal*.{md,json}`, `apps/api/tests/test_skill_journal.py`, `apps/web/src/features/journal-viewer/*` | pending |
-| 3 | [Live check in the skill sandbox](phase-03-live-check.md) | `plans/reports/live-check-261114-*-substitute-research.md` | pending |
+| 1 | [Server tool `research_substitutes`](phase-01-research-tool.md) | `apps/api/src/api/research/*`, `config.py`, `services.py`, `mcp/server.py`, `procurement/errors.py`, `pyproject.toml`, `uv.lock`, `.env.example`, `tests/test_research.py`, `tests/test_mcp.py` | completed |
+| 2 | [Skill and journal: research is mandatory before substitutes](phase-02-skill-research-step.md) | `skills/valio-aimo-purchasing/SKILL.md`, `README.md`, `references/substitute-research.md` (new), `references/worked-example.md`, `references/journal*.{md,json}`, `apps/api/tests/test_skill_journal.py`, `apps/web/src/features/journal-viewer/*` | completed |
+| 3 | [Live check in the skill sandbox](phase-03-live-check.md) | `plans/reports/live-check-261114-*-substitute-research.md` | in progress: tool verified live on Oxylabs; sandbox agent run pending ([report](../reports/live-check-261114-1300-substitute-research.md)) |
 
 Phase 2 depends on phase 1 (it names the tool, its fields and error codes). Phase 3 depends on both.
 
@@ -101,6 +103,5 @@ Phase 2 depends on phase 1 (it names the tool, its fields and error codes). Phas
 
 ## Open questions
 
-1. `gemini-4-hydrogen` is taken from the user's example and is not verified yet; phase 1 step 1
-   confirms it with one live call. If it fails, which model should be the default?
+1. Resolved: research now uses Oxylabs; the Gemini path and `google-genai` are removed.
 2. The key was pasted into this chat. Rotating it after the event is advisable.
