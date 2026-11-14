@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as JournalViewerRouteImport } from './routes/journal-viewer'
+import { Route as ToTheMoonRouteImport } from './routes/to-the-moon'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
 import { Route as OrdersOrderIdRouteImport } from './routes/orders.$orderId'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const JournalViewerRoute = JournalViewerRouteImport.update({
   id: '/journal-viewer',
   path: '/journal-viewer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ToTheMoonRoute = ToTheMoonRouteImport.update({
+  id: '/to-the-moon',
+  path: '/to-the-moon',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersIndexRoute = OrdersIndexRouteImport.update({
@@ -38,12 +44,14 @@ const OrdersOrderIdRoute = OrdersOrderIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/to-the-moon': typeof ToTheMoonRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/orders/': typeof OrdersIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/to-the-moon': typeof ToTheMoonRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/orders': typeof OrdersIndexRoute
 }
@@ -51,20 +59,29 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/journal-viewer': typeof JournalViewerRoute
+  '/to-the-moon': typeof ToTheMoonRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/orders/': typeof OrdersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/journal-viewer' | '/orders/$orderId' | '/orders/'
+  fullPaths:
+    '/' | '/journal-viewer' | '/to-the-moon' | '/orders/$orderId' | '/orders/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/journal-viewer' | '/orders/$orderId' | '/orders'
-  id: '__root__' | '/' | '/journal-viewer' | '/orders/$orderId' | '/orders/'
+  to: '/' | '/journal-viewer' | '/to-the-moon' | '/orders/$orderId' | '/orders'
+  id:
+    | '__root__'
+    | '/'
+    | '/journal-viewer'
+    | '/to-the-moon'
+    | '/orders/$orderId'
+    | '/orders/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   JournalViewerRoute: typeof JournalViewerRoute
+  ToTheMoonRoute: typeof ToTheMoonRoute
   OrdersOrderIdRoute: typeof OrdersOrderIdRoute
   OrdersIndexRoute: typeof OrdersIndexRoute
 }
@@ -83,6 +100,13 @@ declare module '@tanstack/react-router' {
       path: '/journal-viewer'
       fullPath: '/journal-viewer'
       preLoaderRoute: typeof JournalViewerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/to-the-moon': {
+      id: '/to-the-moon'
+      path: '/to-the-moon'
+      fullPath: '/to-the-moon'
+      preLoaderRoute: typeof ToTheMoonRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders/': {
@@ -105,6 +129,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   JournalViewerRoute: JournalViewerRoute,
+  ToTheMoonRoute: ToTheMoonRoute,
   OrdersOrderIdRoute: OrdersOrderIdRoute,
   OrdersIndexRoute: OrdersIndexRoute,
 }

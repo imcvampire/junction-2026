@@ -1,9 +1,10 @@
 import type { ReactNode } from "react"
-import { Link, type LinkProps } from "@tanstack/react-router"
+import { Link, type LinkProps, useRouterState } from "@tanstack/react-router"
 import { MoonIcon, SunIcon } from "lucide-react"
 
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
+import { useSecretCode } from "@/features/to-the-moon/use-secret-code"
 
 const NAV_ITEMS: { to: LinkProps["to"]; label: string }[] = [
   { to: "/orders", label: "Orders" },
@@ -29,7 +30,20 @@ function ThemeToggle() {
   )
 }
 
+const MOON_PATH = "/to-the-moon"
+
+function useMoonTrigger() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  useSecretCode("tothemoon", () => {
+    if (pathname === MOON_PATH) return
+    const tab = window.open(MOON_PATH, "_blank")
+    if (tab) tab.opener = null
+    else window.location.assign(MOON_PATH)
+  })
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
+  useMoonTrigger()
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
       <header className="border-b">
