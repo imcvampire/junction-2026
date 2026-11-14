@@ -8,6 +8,7 @@ the [`valio-aimo-purchasing`](skills/valio-aimo-purchasing/SKILL.md) skill.
 - Challenge brief: [`project.md`](project.md)
 - Goals and acceptance criteria: [`docs/project-goals.md`](docs/project-goals.md)
 - API, MCP tools, errors and approval: [`docs/backend-api.md`](docs/backend-api.md)
+- Deploying to Verda (Terraform and GitHub Actions): [`docs/deployment.md`](docs/deployment.md)
 
 The dataset in `apps/api/data/` is mock data for Junction 2026 only.
 

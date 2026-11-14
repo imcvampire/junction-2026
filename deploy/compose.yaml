@@ -1,0 +1,39 @@
+name: valio-aimo
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    # Written by CI from GitHub secrets; lives outside the release directory.
+    env_file: ${API_CONFIG:?API_CONFIG must be set}
+    volumes:
+      - api-state:/var/lib/app
+    logging: &logging
+      driver: json-file
+      options: { max-size: 20m, max-file: "5" }
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS must be set}
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    logging: *logging
+
+volumes:
+  api-state:
+  caddy-data:
+  caddy-config:

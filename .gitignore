@@ -16,3 +16,6 @@ __pycache__/
 
 *.sqlite3
 *.sqlite3-*
+
+# Local deploy credentials (SSH key, Terraform state passphrase); never commit
+.deploy/

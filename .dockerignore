@@ -1,0 +1,15 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/dist
+**/*.tsbuildinfo
+**/.vitest
+**/.env
+**/.env.*
+**/*.sqlite3
+**/*.sqlite3-*
+.git
+infra
+plans
