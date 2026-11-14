@@ -143,12 +143,17 @@ export function StoragePlanner({
     setBlocks(recommendLayout(items, r, stack))
   }
 
-  // Changing a room dimension re-packs the stacks so they rearrange to fit the
-  // new room rather than being left outside it.
+  // Changing one field re-packs the stacks to fit, but keeps the other fields
+  // as the buyer set them. Only "Reset to recommended" recomputes the room.
   function changeRoom(patch: Partial<Room>): void {
     const next = { ...room, ...patch }
     setRoom(next)
     setBlocks(recommendLayout(items, next, maxStack))
+  }
+
+  function changeMaxStack(stack: number): void {
+    setMaxStack(stack)
+    setBlocks(recommendLayout(items, room, stack))
   }
 
   function metresAt(
@@ -298,10 +303,7 @@ export function StoragePlanner({
               min={0.2}
               max={6}
               step={0.1}
-              onChange={(v) => {
-                setMaxStack(v)
-                resetToRecommended(v)
-              }}
+              onChange={changeMaxStack}
             />
             <Button
               type="button"

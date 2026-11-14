@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -102,6 +102,40 @@ describe("StoragePlanner", () => {
     ])
     render(<StoragePlanner lines={lines} packByProduct={packs} />)
     expect(screen.getByLabelText("Room width (m)")).toHaveValue(2.4)
+  })
+
+  it("keeps the other fields when one field changes", () => {
+    // 20 cm packs -> 9 per 1.8 m stack.
+    const lines = [line("A", 18, "Milk")]
+    const packs = new Map<string, ProductView | null>([
+      ["A", product("A", sizedPack)],
+    ])
+    const { container } = render(
+      <StoragePlanner lines={lines} packByProduct={packs} />
+    )
+    const stacks = () => container.querySelectorAll('g[role="button"]')
+    expect(stacks()).toHaveLength(2)
+
+    const setField = (label: string, value: number) =>
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { value: String(value) },
+      })
+    setField("Room width (m)", 5)
+    setField("Room depth (m)", 4)
+    setField("Room height (m)", 3)
+    setField("Max stack (m)", 1)
+
+    expect(screen.getByLabelText("Room width (m)")).toHaveValue(5)
+    expect(screen.getByLabelText("Room depth (m)")).toHaveValue(4)
+    expect(screen.getByLabelText("Room height (m)")).toHaveValue(3)
+    expect(screen.getByLabelText("Max stack (m)")).toHaveValue(1)
+    // 1 m stacks hold 5 packs, so the floor plan re-packs to 4 stacks.
+    expect(stacks()).toHaveLength(4)
+
+    setField("Room width (m)", 6)
+    expect(screen.getByLabelText("Max stack (m)")).toHaveValue(1)
+    expect(screen.getByLabelText("Room height (m)")).toHaveValue(3)
+    expect(stacks()).toHaveLength(4)
   })
 
   it("labels small stacks with their pack count and lists heights per product", () => {
