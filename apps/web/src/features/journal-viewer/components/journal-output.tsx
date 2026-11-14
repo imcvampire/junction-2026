@@ -71,7 +71,7 @@ function OrderReceipt({
     <div
       role="group"
       aria-label={`Order ${index + 1}`}
-      className="flex min-w-0 flex-col gap-4 rounded-xl p-4 ring-1 ring-foreground/10"
+      className="flex min-w-0 flex-col gap-4 rounded-xl border bg-muted/20 p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="font-heading font-semibold">
@@ -182,7 +182,7 @@ function OptionItem({
   return (
     <li
       data-chosen={option.chosen || undefined}
-      className="flex flex-col gap-2 rounded-lg p-3 ring-1 ring-foreground/10 data-chosen:ring-2 data-chosen:ring-primary"
+      className="flex flex-col gap-4 rounded-xl border bg-background p-4 data-chosen:border-sky-500/50 data-chosen:bg-sky-500/5 data-chosen:ring-1 data-chosen:ring-sky-500/30"
     >
       <span className="flex flex-wrap items-center gap-2">
         <span className="font-medium break-words">{option.name}</span>
@@ -191,7 +191,7 @@ function OptionItem({
           <Badge variant="destructive">Breaks the agent's rules</Badge>
         ) : null}
       </span>
-      <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
         <Field label="Total excl. VAT">
           <Money value={option.line_total} currency={currency} />
         </Field>
@@ -306,7 +306,7 @@ export function JournalOutput({ journal }: { journal: ValioAimoJournal }) {
       ) : null}
 
       {narrative.watch_out ? (
-        <Alert>
+        <Alert className="border-amber-500/30 bg-amber-500/5 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400">
           <TriangleAlertIcon />
           <AlertTitle>Watch out</AlertTitle>
           <AlertDescription className="whitespace-pre-line">
@@ -315,12 +315,12 @@ export function JournalOutput({ journal }: { journal: ValioAimoJournal }) {
         </Alert>
       ) : null}
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-3 rounded-xl border border-sky-500/20 bg-sky-500/5 p-4">
         <h4 className="text-sm font-medium">Next steps</h4>
         {journal.next_steps.length === 0 ? (
           <EmptyNote>Nothing left to do.</EmptyNote>
         ) : (
-          <ul className="list-disc pl-5 text-sm">
+          <ul className="list-decimal space-y-2 pl-5 text-sm leading-relaxed marker:font-semibold marker:text-sky-700 dark:marker:text-sky-300">
             {journal.next_steps.map((step, index) => (
               <li key={index} className="break-words">
                 {step}

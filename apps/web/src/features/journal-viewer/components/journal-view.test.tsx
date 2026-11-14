@@ -169,6 +169,26 @@ describe("JournalView", () => {
     expect(
       screen.getByRole("button", { name: "Only human decisions" })
     ).toHaveAttribute("aria-pressed", "true")
+
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 6 steps")
+    await userEvent.click(screen.getByRole("button", { name: "All steps" }))
+    expect(steps()).toHaveLength(6)
+    expect(screen.getByRole("status")).toHaveTextContent("6 of 6 steps")
+  })
+
+  test("section shortcuts point to available journal sections", () => {
+    const { container } = renderJournal(loadExample())
+    const navigation = within(
+      screen.getByRole("navigation", { name: "Journal sections" })
+    )
+    for (const link of navigation.getAllByRole("link")) {
+      expect(
+        container.querySelector(link.getAttribute("href")!)
+      ).toBeInTheDocument()
+    }
+    expect(
+      navigation.queryByRole("link", { name: "Sources" })
+    ).not.toBeInTheDocument()
   })
 
   test("shows the order as a plain receipt", () => {

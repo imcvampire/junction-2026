@@ -36,8 +36,11 @@ export function JournalHeader({ journal }: { journal: ValioAimoJournal }) {
   ].filter(Boolean)
 
   return (
-    <header className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
+    <header className="relative flex flex-col gap-6 overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 via-card to-card p-5 shadow-sm sm:p-6">
+      <p className="text-xs font-semibold tracking-widest text-sky-700 uppercase dark:text-sky-300">
+        Purchase overview
+      </p>
+      <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <ToneBadge label={outcomeLabel(journal.outcome)} />
           <span>
@@ -49,15 +52,17 @@ export function JournalHeader({ journal }: { journal: ValioAimoJournal }) {
             />
           </span>
         </div>
-        <h2 className="font-heading text-2xl font-semibold break-words">
+        <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight break-words">
           {journal.title}
         </h2>
-        <p className="text-lg break-words">{journal.summary}</p>
+        <p className="text-sm leading-relaxed break-words text-muted-foreground">
+          {journal.summary}
+        </p>
       </div>
       {figures.length > 0 ? (
         <dl
           aria-label="Key figures"
-          className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-xl p-4 text-sm ring-1 ring-foreground/10 sm:grid-cols-3"
+          className="grid grid-cols-1 gap-4 rounded-xl border bg-background/70 p-4 text-lg font-semibold [&_dt]:font-normal"
         >
           {figures}
         </dl>
