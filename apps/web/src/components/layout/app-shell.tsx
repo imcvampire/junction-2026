@@ -6,6 +6,7 @@ import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 
 const NAV_ITEMS: { to: LinkProps["to"]; label: string }[] = [
+  { to: "/orders", label: "Orders" },
   { to: "/journal-viewer", label: "Journal viewer" },
 ]
 
