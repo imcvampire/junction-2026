@@ -5,6 +5,30 @@ export const SKILL_ARCHIVE_URL = `${LIVE_ORIGIN}/skills/${SKILL_NAME}.tar.gz`
 export const REFERENCE_REQUEST =
   "I need 1,000 litres of lactose-free milk by Monday. Find an option that meets our requirements based on price and availability."
 
+export type ExampleRequest = {
+  label: string
+  text: string
+}
+
+export const EXAMPLE_REQUESTS: ExampleRequest[] = [
+  {
+    label: "Cook a dish",
+    text: "I would like to cook coq au vin for 1,000 people next Monday. Find the ingredients we need and buy them.",
+  },
+  {
+    label: "Substitute",
+    text: "We need 50 kg of unsalted butter by Wednesday for baking. If it is not available in time, suggest the closest substitute and ask me before ordering it.",
+  },
+  {
+    label: "Lower carbon",
+    text: "Order 200 litres of oat drink for Friday. Pick the option with the lowest carbon footprint and reliable delivery, as long as it costs no more than 10% above the cheapest.",
+  },
+  {
+    label: "Allergy-safe",
+    text: "Plan breakfast for 300 guests on Saturday with no nuts or gluten: yoghurt, cheese and juice. Compare prices and place one order.",
+  },
+]
+
 export type InstallTab = {
   value: string
   label: string

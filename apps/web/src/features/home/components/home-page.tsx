@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CodeBlock } from "@/features/home/components/code-block"
 import {
   AGENT_INSTALL_PROMPT,
+  EXAMPLE_REQUESTS,
   type InstallTab,
   LIVE_ORIGIN,
   MCP_TABS,
@@ -327,6 +328,22 @@ export function HomePage() {
                 connected. Then paste the reference request:
               </p>
               <CodeBlock code={REFERENCE_REQUEST} label="reference request" />
+              <p className="text-sm text-muted-foreground">
+                Or try a harder one:
+              </p>
+              <ul className="flex flex-col gap-3">
+                {EXAMPLE_REQUESTS.map((example) => (
+                  <li key={example.label} className="flex flex-col gap-1.5">
+                    <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      {example.label}
+                    </span>
+                    <CodeBlock
+                      code={example.text}
+                      label={`${example.label} request`}
+                    />
+                  </li>
+                ))}
+              </ul>
               <p className="text-sm text-muted-foreground">
                 Expect the agent to check its spend limit, search the catalog,
                 quote a short list, and place an order. Over the spend limit it
