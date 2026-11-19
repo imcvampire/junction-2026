@@ -12,6 +12,9 @@ the [`valio-aimo-purchasing`](skills/valio-aimo-purchasing/SKILL.md) skill.
 
 The dataset in `apps/api/data/` is mock data for Junction 2026 only.
 
+# Pitch 
+https://youtu.be/Pu46yXhvFcE?si=5z2W8XOsshNpCvYL 
+
 ## Run the project
 
 You need [mise](https://mise.jdx.dev). It installs Python, uv, Node and pnpm and loads `.env` into
